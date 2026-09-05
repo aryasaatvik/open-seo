@@ -2,11 +2,11 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Modal } from "@/client/components/Modal";
 import { GoogleGlyph } from "@/client/features/gsc/GoogleGlyph";
-import { startGoogleLink } from "@/client/features/integrations/startGoogleLink";
+import { startGoogleConnect } from "@/client/features/integrations/googleConnect";
 import { onboardingAnswersQueryOptions } from "@/client/features/onboarding/onboardingModel";
 import { captureClientEvent } from "@/client/lib/posthog";
 import { isHostedClientAuthMode } from "@/lib/auth-mode";
-import { getGscGrantStatus } from "@/serverFunctions/gsc";
+import { getGoogleConnectionStatus } from "@/serverFunctions/google";
 import { dismissGscNudge } from "@/serverFunctions/onboarding";
 
 /**
@@ -36,8 +36,8 @@ export function GscReEngagementModal({
     enabled: hosted,
   });
   const grantQuery = useQuery({
-    queryKey: ["gscGrantStatus"],
-    queryFn: () => getGscGrantStatus(),
+    queryKey: ["googleConnectionStatus"],
+    queryFn: () => getGoogleConnectionStatus(),
     enabled: hosted,
   });
 
@@ -60,7 +60,7 @@ export function GscReEngagementModal({
     grantQuery.isSuccess &&
     Boolean(onboardingQuery.data?.completedAt) &&
     !onboardingQuery.data?.gscNudgeDismissedAt &&
-    !grantQuery.data?.connected;
+    !grantQuery.data?.gsc.connected;
 
   React.useEffect(() => {
     if (eligible && !shownRef.current) {
@@ -89,10 +89,10 @@ export function GscReEngagementModal({
     persistDismiss();
     // Land them on the project's integrations page so they can pick a property
     // right after granting access (the grant alone has no property bound yet).
-    const callbackURL = projectId
-      ? `${window.location.origin}/p/${projectId}/settings/integrations`
-      : window.location.href;
-    void startGoogleLink("gsc", callbackURL);
+    startGoogleConnect(
+      "gsc",
+      projectId ? `/p/${projectId}/settings/integrations` : undefined,
+    );
   }
 
   return (

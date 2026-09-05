@@ -45,18 +45,6 @@ describe("runSelfhostPreflight", () => {
     expect(itemFor(result, "TEAM_DOMAIN")?.message).toContain("https://");
   });
 
-  it("warns that GSC stays disabled on a short BETTER_AUTH_SECRET", () => {
-    const result = runSelfhostPreflight({
-      AUTH_MODE: "local_noauth",
-      GOOGLE_CLIENT_ID: "id",
-      GOOGLE_CLIENT_SECRET: "secret",
-      BETTER_AUTH_SECRET: "too-short",
-    });
-
-    expect(itemFor(result, "Search Console")?.level).toBe("warn");
-    expect(itemFor(result, "Search Console")?.message).toContain("32");
-  });
-
   it("fails hosted mode listing every missing variable", () => {
     const result = runSelfhostPreflight({
       AUTH_MODE: "hosted",

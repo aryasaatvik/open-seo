@@ -12,8 +12,7 @@ async function getMeasurementHealth(projectId: string) {
     );
   }
   const client = createGa4AdminClient({
-    userId: connection.connectedByUserId,
-    ga4AccountId: connection.ga4AccountId,
+    organizationId: connection.organizationId,
   });
   try {
     const streams = await client.listDataStreams(connection.propertyId);

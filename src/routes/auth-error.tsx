@@ -18,7 +18,7 @@ export const Route = createFileRoute("/auth-error")({
  * page that started the flow (wired via `onAPIError.errorURL` in auth.ts):
  * Google-side errors like a canceled consent screen, replayed callback URLs,
  * and sign-in failures. Link failures that Better Auth can attribute to a
- * specific flow return to the connect surface instead (see startGoogleLink's
+ * specific flow return to the connect surface instead (see the Google connect flow's
  * errorCallbackURL).
  */
 function AuthErrorPage() {

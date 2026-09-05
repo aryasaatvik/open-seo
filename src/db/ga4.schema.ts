@@ -3,8 +3,8 @@ import { index, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { projects } from "./app.schema";
 import { organization } from "./better-auth-schema";
 
-// Selected Google Analytics property per project. OAuth credentials stay in
-// Better Auth's account table under the dedicated "google-analytics" provider.
+// Selected Google Analytics property per project. The Google grant itself
+// lives in the integration gateway (one org-level connection).
 export const ga4Connections = sqliteTable(
   "ga4_connections",
   {
@@ -20,9 +20,6 @@ export const ga4Connections = sqliteTable(
     propertyDisplayName: text("property_display_name").notNull(),
     propertyTimeZone: text("property_time_zone").notNull(),
     propertyCurrencyCode: text("property_currency_code").notNull(),
-    connectedByUserId: text("connected_by_user_id").notNull(),
-    ga4AccountId: text("ga4_account_id").notNull(),
-    connectedAccountEmail: text("connected_account_email"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(current_timestamp)`),
@@ -33,9 +30,5 @@ export const ga4Connections = sqliteTable(
   (table) => [
     uniqueIndex("ga4_connections_project_idx").on(table.projectId),
     index("ga4_connections_organization_idx").on(table.organizationId),
-    index("ga4_connections_connector_idx").on(
-      table.connectedByUserId,
-      table.ga4AccountId,
-    ),
   ],
 );
