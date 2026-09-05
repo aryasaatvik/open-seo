@@ -5,21 +5,14 @@ import { makeToolContext } from "./tool-test-support";
 
 const mocks = vi.hoisted(() => ({
   getProjectForOrganization: vi.fn(),
-  isHostedServerAuthMode: vi.fn(),
-  hasSelfHostedGoogleOAuthConfig: vi.fn(),
   GscService: {
+    getGoogleConnection: vi.fn(),
     getPerformance: vi.fn(),
     inspectUrls: vi.fn(),
   },
 }));
 
 vi.mock("cloudflare:workers", () => ({ env: {} }));
-vi.mock("@/server/lib/runtime-env", () => ({
-  isHostedServerAuthMode: mocks.isHostedServerAuthMode,
-}));
-vi.mock("@/server/features/google/oauth-config", () => ({
-  hasSelfHostedGoogleOAuthConfig: mocks.hasSelfHostedGoogleOAuthConfig,
-}));
 vi.mock("@/server/features/projects/services/ProjectService", () => ({
   ProjectService: {
     getProjectForOrganization: mocks.getProjectForOrganization,
@@ -37,8 +30,10 @@ describe("search console MCP tools", () => {
       locationCode: 2840,
       languageCode: "en",
     });
-    mocks.isHostedServerAuthMode.mockResolvedValue(true);
-    mocks.hasSelfHostedGoogleOAuthConfig.mockResolvedValue(false);
+    mocks.GscService.getGoogleConnection.mockResolvedValue({
+      connected: true,
+      email: null,
+    });
   });
 
   it("returns performance rows on success and passes filters through", async () => {
@@ -174,9 +169,11 @@ describe("search console MCP tools", () => {
     expect(mocks.GscService.getPerformance).not.toHaveBeenCalled();
   });
 
-  it("returns a setup message in self-hosted mode without a Google client", async () => {
-    mocks.isHostedServerAuthMode.mockResolvedValue(false);
-    mocks.hasSelfHostedGoogleOAuthConfig.mockResolvedValue(false);
+  it("returns a connect nudge when Google is not connected to the gateway", async () => {
+    mocks.GscService.getGoogleConnection.mockResolvedValue({
+      connected: false,
+      email: null,
+    });
     const { getSearchConsolePerformanceTool } = searchConsoleTools;
 
     const result = await getSearchConsolePerformanceTool.handler(
@@ -185,14 +182,12 @@ describe("search console MCP tools", () => {
     );
 
     expect(result.structuredContent).toMatchObject({
-      reason: "gsc_oauth_not_configured",
+      reason: "google_not_connected",
     });
     expect(mocks.GscService.getPerformance).not.toHaveBeenCalled();
   });
 
-  it("allows performance queries in self-hosted mode with a Google client", async () => {
-    mocks.isHostedServerAuthMode.mockResolvedValue(false);
-    mocks.hasSelfHostedGoogleOAuthConfig.mockResolvedValue(true);
+  it("allows performance queries once Google is connected", async () => {
     mocks.GscService.getPerformance.mockResolvedValue({
       siteUrl: "https://example.com/",
       connectedBy: "alice@example.com",
@@ -277,9 +272,11 @@ describe("search console MCP tools", () => {
     });
   });
 
-  it("returns a setup message for inspect_urls in self-hosted mode without a Google client", async () => {
-    mocks.isHostedServerAuthMode.mockResolvedValue(false);
-    mocks.hasSelfHostedGoogleOAuthConfig.mockResolvedValue(false);
+  it("returns a connect nudge for inspect_urls when Google is not connected", async () => {
+    mocks.GscService.getGoogleConnection.mockResolvedValue({
+      connected: false,
+      email: null,
+    });
     const { inspectUrlsTool } = searchConsoleTools;
 
     const result = await inspectUrlsTool.handler(
@@ -288,7 +285,7 @@ describe("search console MCP tools", () => {
     );
 
     expect(result.structuredContent).toMatchObject({
-      reason: "gsc_oauth_not_configured",
+      reason: "google_not_connected",
     });
     expect(mocks.GscService.inspectUrls).not.toHaveBeenCalled();
   });

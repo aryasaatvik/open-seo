@@ -1,13 +1,11 @@
 import { captureClientEvent } from "@/client/lib/posthog";
 
-/**
- * Marker appended to the errorCallbackURL so a failed Google link redirect can
- * be told apart from any other `error` query param. Its value is the provider
- * key ("gsc" | "ga4").
- */
-export const GOOGLE_LINK_ERROR_PARAM = "google_link_error";
+import {
+  GOOGLE_LINK_ERROR_PARAM,
+  type GoogleLinkProvider,
+} from "@/shared/google-link";
 
-export type GoogleLinkProvider = "gsc" | "ga4";
+export type { GoogleLinkProvider } from "@/shared/google-link";
 
 type CapturedLinkError = {
   provider: GoogleLinkProvider;

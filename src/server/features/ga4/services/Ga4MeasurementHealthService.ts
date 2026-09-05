@@ -11,10 +11,7 @@ async function getMeasurementHealth(projectId: string) {
       "Google Analytics is not connected for this project.",
     );
   }
-  const client = createGa4AdminClient({
-    userId: connection.connectedByUserId,
-    ga4AccountId: connection.ga4AccountId,
-  });
+  const client = createGa4AdminClient();
   try {
     const streams = await client.listDataStreams(connection.propertyId);
     const webStreams = [];

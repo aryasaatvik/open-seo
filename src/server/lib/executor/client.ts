@@ -18,7 +18,7 @@ export type ToolFailure = {
   retryable?: boolean;
 };
 
-type ToolResult<T> =
+export type ToolResult<T> =
   | { ok: true; data: T; http?: ToolHttpMeta }
   | { ok: false; error: ToolFailure };
 

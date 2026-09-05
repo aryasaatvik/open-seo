@@ -1,11 +1,10 @@
-import { getAuth } from "@/lib/auth";
-import { GSC_OAUTH_PROVIDER_ID } from "@/shared/gsc";
+import type { ToolFailure } from "@/server/lib/executor/client";
+import {
+  invokeGoogleTool,
+  isCredentialFailure,
+} from "@/server/lib/executor/google";
+import { GOOGLE_SEARCH_CONSOLE_INTEGRATION } from "@/shared/integration-addresses";
 import { GscApiError, GscTokenError } from "./gscErrors";
-
-export { GscApiError, GscTokenError } from "./gscErrors";
-
-const GSC_API_BASE = "https://www.googleapis.com/webmasters/v3";
-const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 
 /** A GSC REST call returned a non-2xx status. `status` drives user-facing messaging. */
 export type GscSite = {
@@ -76,78 +75,42 @@ function messageForStatus(status: number, body: string): string {
   return `Search Console API error (${status}): ${body.slice(0, 300)}`;
 }
 
-/** Free Google Search Console client. Unlike the DataForSEO client it does NOT
- *  meter credits — GSC is first-party data with no per-call cost. Access tokens
- *  are minted (and auto-refreshed) by Better Auth from the connector's stored
- *  google-search-console grant. */
-export function createGscClient(opts: {
-  userId: string;
-  gscAccountId?: string;
-}) {
-  async function getToken(): Promise<string> {
-    let result: { accessToken?: string } | undefined;
-    try {
-      // Headerless call: getAccessToken trusts body.userId when no request
-      // session is present, and auto-refreshes via the genericOAuth provider.
-      // Works in every auth mode — self-hosted builds the same Better Auth
-      // instance once BETTER_AUTH_SECRET is set.
-      result = await getAuth().api.getAccessToken({
-        body: {
-          providerId: GSC_OAUTH_PROVIDER_ID,
-          userId: opts.userId,
-          ...(opts.gscAccountId ? { accountId: opts.gscAccountId } : {}),
-        },
-      });
-    } catch (error) {
-      throw new GscTokenError(
-        "Could not mint a Search Console access token (grant revoked or expired).",
-        error,
-      );
-    }
-    if (!result?.accessToken) {
-      throw new GscTokenError(
-        "Search Console returned no access token (grant revoked or expired).",
-      );
-    }
-    return result.accessToken;
+function toError(failure: ToolFailure): Error {
+  if (isCredentialFailure(failure)) {
+    return new GscTokenError(
+      "Search Console access is gone (grant revoked or expired). Reconnect Google.",
+      failure,
+    );
   }
+  const body = JSON.stringify(failure.details ?? failure.message);
+  return new GscApiError(
+    failure.status ?? 0,
+    messageForStatus(failure.status ?? 0, body),
+    body,
+  );
+}
 
-  async function request<T>(
-    url: string,
-    init?: { method?: string; body?: unknown },
+/** Free Google Search Console client over the integration gateway. Unlike the
+ *  DataForSEO client it does NOT meter credits — GSC is first-party data with
+ *  no per-call cost. The gateway holds and refreshes the OAuth grant. */
+export function createGscClient() {
+  async function call<T>(
+    suffix: string,
+    args: Record<string, unknown>,
   ): Promise<T> {
-    const token = await getToken();
-    const hasBody = init?.body !== undefined;
-    const response = await fetch(url, {
-      method: init?.method ?? "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...(hasBody ? { "Content-Type": "application/json" } : {}),
-      },
-      body: hasBody ? JSON.stringify(init?.body) : undefined,
-    });
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      throw new GscApiError(
-        response.status,
-        messageForStatus(response.status, body),
-        body,
-      );
-    }
-    return (await response.json()) as T;
+    const result = await invokeGoogleTool<T>(
+      GOOGLE_SEARCH_CONSOLE_INTEGRATION,
+      suffix,
+      args,
+    );
+    if (!result.ok) throw toError(result.error);
+    return result.data;
   }
 
   return {
-    async getUserInfoEmail(): Promise<string | null> {
-      const data = await request<{ email?: unknown }>(GOOGLE_USERINFO_URL);
-      return typeof data.email === "string" ? data.email : null;
-    },
-
     /** Webmasters API `sites.list` — the verified properties on the grant. */
     async listSites(): Promise<GscSite[]> {
-      const data = await request<{ siteEntry?: GscSite[] }>(
-        `${GSC_API_BASE}/sites`,
-      );
+      const data = await call<{ siteEntry?: GscSite[] }>("sites.list", {});
       return data.siteEntry ?? [];
     },
 
@@ -156,25 +119,23 @@ export function createGscClient(opts: {
       siteUrl: string,
       body: GscSearchAnalyticsRequest,
     ): Promise<GscSearchAnalyticsRow[]> {
-      const data = await request<{ rows?: GscSearchAnalyticsRow[] }>(
-        `${GSC_API_BASE}/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`,
-        { method: "POST", body },
+      const data = await call<{ rows?: GscSearchAnalyticsRow[] }>(
+        "searchanalytics.query",
+        { siteUrl, body },
       );
       return data.rows ?? [];
     },
 
-    /** URL Inspection API `urlInspection.index.inspect`. This lives on a
-     *  different host than the Webmasters v3 base, so the full URL is passed to
-     *  the request helper. Same `webmasters.readonly` scope. */
+    /** URL Inspection API `urlInspection.index.inspect`. Same
+     *  `webmasters.readonly` scope as the Webmasters API. */
     async inspectUrl(
       siteUrl: string,
       inspectionUrl: string,
       languageCode?: string,
     ): Promise<UrlInspectionResult | null> {
-      const data = await request<{ inspectionResult?: UrlInspectionResult }>(
-        "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect",
+      const data = await call<{ inspectionResult?: UrlInspectionResult }>(
+        "urlInspection.index.inspect",
         {
-          method: "POST",
           body: {
             siteUrl,
             inspectionUrl,

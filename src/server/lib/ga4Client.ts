@@ -1,21 +1,22 @@
 /* eslint-disable max-lines -- one client module per Google integration (gscClient precedent); GA4 spans the Admin and Data APIs */
 import { z } from "zod";
-import { getAuth } from "@/lib/auth";
+import type { ToolFailure } from "@/server/lib/executor/client";
+import {
+  invokeGoogleTool,
+  isCredentialFailure,
+} from "@/server/lib/executor/google";
 import {
   Ga4AdminApiError,
   Ga4DataApiError,
   Ga4MalformedResponseError,
   Ga4TokenError,
 } from "@/server/lib/ga4Errors";
-import { GA4_OAUTH_PROVIDER_ID } from "@/shared/ga4";
+import {
+  GOOGLE_ANALYTICS_ADMIN_INTEGRATION,
+  GOOGLE_ANALYTICS_DATA_INTEGRATION,
+} from "@/shared/integration-addresses";
 
-const GA4_ADMIN_API_BASE = "https://analyticsadmin.googleapis.com/v1beta";
-const GA4_ADMIN_ALPHA_API_BASE =
-  "https://analyticsadmin.googleapis.com/v1alpha";
-const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
-const GA4_DATA_API_BASE = "https://analyticsdata.googleapis.com/v1beta";
 const MAX_ACCOUNT_SUMMARY_PAGES = 100;
-const MAX_ERROR_BODY_LENGTH = 8_000;
 const propertyIdSchema = z.string().regex(/^properties\/\d+$/);
 const dataStreamNameSchema = z
   .string()
@@ -124,31 +125,6 @@ type Ga4PropertySummary = {
 
 type Ga4Property = z.infer<typeof propertySchema>;
 
-async function getGa4AccessToken(opts: {
-  userId: string;
-  ga4AccountId: string;
-}): Promise<string> {
-  let result: { accessToken?: string } | undefined;
-  try {
-    result = await getAuth().api.getAccessToken({
-      body: {
-        providerId: GA4_OAUTH_PROVIDER_ID,
-        userId: opts.userId,
-        accountId: opts.ga4AccountId,
-      },
-    });
-  } catch (error) {
-    throw new Ga4TokenError(
-      "Could not mint a Google Analytics access token.",
-      error,
-    );
-  }
-  if (!result?.accessToken) {
-    throw new Ga4TokenError("Google Analytics returned no access token.");
-  }
-  return result.accessToken;
-}
-
 function adminMessageForStatus(status: number): string {
   if (status === 401) return "Google Analytics connection expired.";
   if (status === 403) {
@@ -158,71 +134,47 @@ function adminMessageForStatus(status: number): string {
   return `Google Analytics Admin API error (${status}).`;
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
+function tokenError(failure: ToolFailure): Ga4TokenError {
+  return new Ga4TokenError(
+    "Google Analytics access is gone (grant revoked or expired). Reconnect Google.",
+    failure,
+  );
 }
 
-function memoizedGa4AccessToken(opts: {
-  userId: string;
-  ga4AccountId: string;
-}) {
-  let accessTokenPromise: Promise<string> | undefined;
-  return () => (accessTokenPromise ??= getGa4AccessToken(opts));
-}
-
-/** Read-only Admin API client used only for account/property discovery. */
-export function createGa4AdminClient(opts: {
-  userId: string;
-  ga4AccountId: string;
-}) {
-  const accessToken = memoizedGa4AccessToken(opts);
-
-  async function request(url: string): Promise<unknown> {
-    const token = await accessToken();
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-    } catch (error) {
-      if (isAbortError(error)) throw error;
-      throw new Ga4AdminApiError(
-        0,
-        "Google Analytics Admin API is temporarily unavailable.",
-      );
-    }
-    if (!response.ok) {
-      throw new Ga4AdminApiError(
-        response.status,
-        adminMessageForStatus(response.status),
-      );
-    }
-    return response.json();
-  }
-
-  function propertyUrl(base: string, propertyId: string, child: string): URL {
-    const canonicalId = propertyIdSchema.parse(propertyId);
-    return new URL(`${base}/${canonicalId}/${child}`);
+/** Read-only Admin API client used only for account/property discovery. The
+ *  gateway holds and refreshes the OAuth grant. */
+export function createGa4AdminClient() {
+  async function call(
+    suffix: string,
+    args: Record<string, unknown>,
+  ): Promise<unknown> {
+    const result = await invokeGoogleTool<unknown>(
+      GOOGLE_ANALYTICS_ADMIN_INTEGRATION,
+      suffix,
+      args,
+    );
+    if (result.ok) return result.data;
+    if (isCredentialFailure(result.error)) throw tokenError(result.error);
+    const status = result.error.status ?? 0;
+    throw new Ga4AdminApiError(
+      status,
+      status === 0
+        ? "Google Analytics Admin API is temporarily unavailable."
+        : adminMessageForStatus(status),
+    );
   }
 
   return {
-    async getUserInfoEmail(): Promise<string | null> {
-      const data = z
-        .object({ email: z.string().email().optional() })
-        .parse(await request(GOOGLE_USERINFO_URL));
-      return data.email ?? null;
-    },
-
     async listProperties(): Promise<Ga4PropertySummary[]> {
       const properties: Ga4PropertySummary[] = [];
       let pageToken: string | undefined;
 
       for (let page = 0; page < MAX_ACCOUNT_SUMMARY_PAGES; page += 1) {
-        const url = new URL(`${GA4_ADMIN_API_BASE}/accountSummaries`);
-        url.searchParams.set("pageSize", "200");
-        if (pageToken) url.searchParams.set("pageToken", pageToken);
         const response = accountSummariesResponseSchema.parse(
-          await request(url.toString()),
+          await call("accountSummaries.list", {
+            pageSize: 200,
+            ...(pageToken ? { pageToken } : {}),
+          }),
         );
         for (const account of response.accountSummaries ?? []) {
           for (const property of account.propertySummaries ?? []) {
@@ -244,61 +196,50 @@ export function createGa4AdminClient(opts: {
     },
 
     async getProperty(propertyId: string): Promise<Ga4Property> {
-      const canonicalId = propertyIdSchema.parse(propertyId);
-      return propertySchema.parse(
-        await request(`${GA4_ADMIN_API_BASE}/${canonicalId}`),
-      );
+      const name = propertyIdSchema.parse(propertyId);
+      return propertySchema.parse(await call("properties.get", { name }));
     },
 
     async listDataStreams(propertyId: string) {
-      const url = propertyUrl(
-        GA4_ADMIN_ALPHA_API_BASE,
-        propertyId,
-        "dataStreams",
-      );
-      url.searchParams.set("pageSize", "200");
+      const parent = propertyIdSchema.parse(propertyId);
       const response = dataStreamsResponseSchema.parse(
-        await request(url.toString()),
+        await call("properties.dataStreams.list", { parent, pageSize: 200 }),
       );
       return response.dataStreams ?? [];
     },
 
     async getEnhancedMeasurementSettings(streamName: string) {
-      const canonicalName = dataStreamNameSchema.parse(streamName);
+      const name = `${dataStreamNameSchema.parse(streamName)}/enhancedMeasurementSettings`;
       return enhancedMeasurementSettingsSchema.parse(
-        await request(
-          `${GA4_ADMIN_ALPHA_API_BASE}/${canonicalName}/enhancedMeasurementSettings`,
-        ),
+        await call("properties.dataStreams.getEnhancedMeasurementSettings", {
+          name,
+        }),
       );
     },
 
     async listKeyEvents(propertyId: string) {
-      const url = propertyUrl(GA4_ADMIN_API_BASE, propertyId, "keyEvents");
-      url.searchParams.set("pageSize", "200");
+      const parent = propertyIdSchema.parse(propertyId);
       const response = keyEventsResponseSchema.parse(
-        await request(url.toString()),
+        await call("properties.keyEvents.list", { parent, pageSize: 200 }),
       );
       return response.keyEvents ?? [];
     },
 
     async listCustomDimensions(propertyId: string) {
-      const url = propertyUrl(
-        GA4_ADMIN_API_BASE,
-        propertyId,
-        "customDimensions",
-      );
-      url.searchParams.set("pageSize", "200");
+      const parent = propertyIdSchema.parse(propertyId);
       const response = customDimensionsResponseSchema.parse(
-        await request(url.toString()),
+        await call("properties.customDimensions.list", {
+          parent,
+          pageSize: 200,
+        }),
       );
       return response.customDimensions ?? [];
     },
 
     async listCustomMetrics(propertyId: string) {
-      const url = propertyUrl(GA4_ADMIN_API_BASE, propertyId, "customMetrics");
-      url.searchParams.set("pageSize", "200");
+      const parent = propertyIdSchema.parse(propertyId);
       const response = customMetricsResponseSchema.parse(
-        await request(url.toString()),
+        await call("properties.customMetrics.list", { parent, pageSize: 200 }),
       );
       return response.customMetrics ?? [];
     },
@@ -398,12 +339,6 @@ export type Ga4RunReportRequest = {
   returnPropertyQuota: true;
 };
 
-function safeRetryAfter(response: Response): number | null {
-  const value = response.headers.get("retry-after");
-  if (!value || !/^\d+$/.test(value)) return null;
-  return Math.min(Number(value), 86_400);
-}
-
 function dataMessageForStatus(status: number): string {
   if (status === 400) return "Google Analytics rejected this report.";
   if (status === 401) return "Google Analytics connection expired.";
@@ -412,70 +347,48 @@ function dataMessageForStatus(status: number): string {
   return "Google Analytics reporting is temporarily unavailable.";
 }
 
-export function createGa4DataClient(opts: {
-  userId: string;
-  ga4AccountId: string;
-  propertyId: string;
-}) {
-  const propertyId = propertyIdSchema.parse(opts.propertyId);
-  const accessToken = memoizedGa4AccessToken(opts);
+/** Google's error body rides on the failure's `details`; pull the reason the
+ *  Data API attached (e.g. SERVICE_DISABLED) when it is there. */
+function upstreamReasonOf(failure: ToolFailure): string | null {
+  const parsed = googleErrorSchema.safeParse(failure.details);
+  if (!parsed.success) return null;
+  return (
+    parsed.data.error.details?.find(
+      (detail) => detail.metadata?.service === "analyticsdata.googleapis.com",
+    )?.reason ??
+    parsed.data.error.details?.find((detail) => detail.reason)?.reason ??
+    null
+  );
+}
+
+export function createGa4DataClient(opts: { propertyId: string }) {
+  const property = propertyIdSchema.parse(opts.propertyId);
 
   return {
     async runReport(
       request: Ga4RunReportRequest,
     ): Promise<Ga4RunReportResponse> {
-      const token = await accessToken();
-      let response: Response;
-      try {
-        response = await fetch(`${GA4_DATA_API_BASE}/${propertyId}:runReport`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(request),
-        });
-      } catch (error) {
-        if (isAbortError(error)) throw error;
+      const result = await invokeGoogleTool<unknown>(
+        GOOGLE_ANALYTICS_DATA_INTEGRATION,
+        "properties.runReport",
+        { property, body: request },
+      );
+      if (!result.ok) {
+        if (isCredentialFailure(result.error)) throw tokenError(result.error);
+        const status = result.error.status ?? 0;
         throw new Ga4DataApiError(
-          0,
-          "Google Analytics reporting is temporarily unavailable.",
-        );
-      }
-      if (!response.ok) {
-        const body = await response
-          .text()
-          .then((responseBody) => responseBody.slice(0, MAX_ERROR_BODY_LENGTH))
-          .catch(() => "");
-        let upstreamReason: string | null = null;
-        try {
-          const parsed = googleErrorSchema.safeParse(JSON.parse(body));
-          if (parsed.success) {
-            upstreamReason =
-              parsed.data.error.details?.find(
-                (detail) =>
-                  detail.metadata?.service === "analyticsdata.googleapis.com",
-              )?.reason ??
-              parsed.data.error.details?.find((detail) => detail.reason)
-                ?.reason ??
-              null;
-          }
-        } catch {
-          // Non-JSON error pages intentionally collapse to status-only errors.
-        }
-        throw new Ga4DataApiError(
-          response.status,
-          dataMessageForStatus(response.status),
-          safeRetryAfter(response),
-          upstreamReason,
+          status,
+          status === 0
+            ? "Google Analytics reporting is temporarily unavailable."
+            : dataMessageForStatus(status),
+          null,
+          upstreamReasonOf(result.error),
         );
       }
 
-      try {
-        return runReportResponseSchema.parse(await response.json());
-      } catch {
-        throw new Ga4MalformedResponseError();
-      }
+      const parsed = runReportResponseSchema.safeParse(result.data);
+      if (!parsed.success) throw new Ga4MalformedResponseError();
+      return parsed.data;
     },
   };
 }

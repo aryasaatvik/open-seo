@@ -41,8 +41,8 @@ import { Route as AppHelpOpenrouterApiKeyRouteImport } from './routes/_app/help/
 import { Route as AppHelpDataforseoApiKeyRouteImport } from './routes/_app/help/dataforseo-api-key'
 import { Route as ProjectPProjectIdRouteRouteImport } from './routes/_project/p/$projectId/route'
 import { Route as ProjectPProjectIdIndexRouteImport } from './routes/_project/p/$projectId/index'
-import { Route as ApiGscOauthCallbackRouteImport } from './routes/api/gsc/oauth/callback'
-import { Route as ApiGa4OauthCallbackRouteImport } from './routes/api/ga4/oauth/callback'
+import { Route as ApiIntegrationsGoogleStartRouteImport } from './routes/api/integrations/google/start'
+import { Route as ApiIntegrationsGoogleCallbackRouteImport } from './routes/api/integrations/google/callback'
 import { Route as ProjectPProjectIdSettingsRouteImport } from './routes/_project/p/$projectId/settings'
 import { Route as ProjectPProjectIdSearchPerformanceRouteImport } from './routes/_project/p/$projectId/search-performance'
 import { Route as ProjectPProjectIdSavedRouteImport } from './routes/_project/p/$projectId/saved'
@@ -222,16 +222,18 @@ const ProjectPProjectIdIndexRoute = ProjectPProjectIdIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ProjectPProjectIdRouteRoute,
 } as any)
-const ApiGscOauthCallbackRoute = ApiGscOauthCallbackRouteImport.update({
-  id: '/api/gsc/oauth/callback',
-  path: '/api/gsc/oauth/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiGa4OauthCallbackRoute = ApiGa4OauthCallbackRouteImport.update({
-  id: '/api/ga4/oauth/callback',
-  path: '/api/ga4/oauth/callback',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const ApiIntegrationsGoogleStartRoute =
+  ApiIntegrationsGoogleStartRouteImport.update({
+    id: '/api/integrations/google/start',
+    path: '/api/integrations/google/start',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiIntegrationsGoogleCallbackRoute =
+  ApiIntegrationsGoogleCallbackRouteImport.update({
+    id: '/api/integrations/google/callback',
+    path: '/api/integrations/google/callback',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ProjectPProjectIdSettingsRoute =
   ProjectPProjectIdSettingsRouteImport.update({
     id: '/settings',
@@ -376,8 +378,8 @@ export interface FileRoutesByFullPath {
   '/p/$projectId/saved': typeof ProjectPProjectIdSavedRoute
   '/p/$projectId/search-performance': typeof ProjectPProjectIdSearchPerformanceRoute
   '/p/$projectId/settings': typeof ProjectPProjectIdSettingsRouteWithChildren
-  '/api/ga4/oauth/callback': typeof ApiGa4OauthCallbackRoute
-  '/api/gsc/oauth/callback': typeof ApiGscOauthCallbackRoute
+  '/api/integrations/google/callback': typeof ApiIntegrationsGoogleCallbackRoute
+  '/api/integrations/google/start': typeof ApiIntegrationsGoogleStartRoute
   '/p/$projectId/': typeof ProjectPProjectIdIndexRoute
   '/p/$projectId/rank-tracking/$configId': typeof ProjectPProjectIdRankTrackingConfigIdRoute
   '/p/$projectId/settings/context': typeof ProjectPProjectIdSettingsContextRoute
@@ -421,8 +423,8 @@ export interface FileRoutesByTo {
   '/p/$projectId/sam': typeof ProjectPProjectIdSamRoute
   '/p/$projectId/saved': typeof ProjectPProjectIdSavedRoute
   '/p/$projectId/search-performance': typeof ProjectPProjectIdSearchPerformanceRoute
-  '/api/ga4/oauth/callback': typeof ApiGa4OauthCallbackRoute
-  '/api/gsc/oauth/callback': typeof ApiGscOauthCallbackRoute
+  '/api/integrations/google/callback': typeof ApiIntegrationsGoogleCallbackRoute
+  '/api/integrations/google/start': typeof ApiIntegrationsGoogleStartRoute
   '/p/$projectId': typeof ProjectPProjectIdIndexRoute
   '/p/$projectId/rank-tracking/$configId': typeof ProjectPProjectIdRankTrackingConfigIdRoute
   '/p/$projectId/settings/context': typeof ProjectPProjectIdSettingsContextRoute
@@ -476,8 +478,8 @@ export interface FileRoutesById {
   '/_project/p/$projectId/saved': typeof ProjectPProjectIdSavedRoute
   '/_project/p/$projectId/search-performance': typeof ProjectPProjectIdSearchPerformanceRoute
   '/_project/p/$projectId/settings': typeof ProjectPProjectIdSettingsRouteWithChildren
-  '/api/ga4/oauth/callback': typeof ApiGa4OauthCallbackRoute
-  '/api/gsc/oauth/callback': typeof ApiGscOauthCallbackRoute
+  '/api/integrations/google/callback': typeof ApiIntegrationsGoogleCallbackRoute
+  '/api/integrations/google/start': typeof ApiIntegrationsGoogleStartRoute
   '/_project/p/$projectId/': typeof ProjectPProjectIdIndexRoute
   '/_project/p/$projectId/rank-tracking/$configId': typeof ProjectPProjectIdRankTrackingConfigIdRoute
   '/_project/p/$projectId/settings/context': typeof ProjectPProjectIdSettingsContextRoute
@@ -528,8 +530,8 @@ export interface FileRouteTypes {
     | '/p/$projectId/saved'
     | '/p/$projectId/search-performance'
     | '/p/$projectId/settings'
-    | '/api/ga4/oauth/callback'
-    | '/api/gsc/oauth/callback'
+    | '/api/integrations/google/callback'
+    | '/api/integrations/google/start'
     | '/p/$projectId/'
     | '/p/$projectId/rank-tracking/$configId'
     | '/p/$projectId/settings/context'
@@ -573,8 +575,8 @@ export interface FileRouteTypes {
     | '/p/$projectId/sam'
     | '/p/$projectId/saved'
     | '/p/$projectId/search-performance'
-    | '/api/ga4/oauth/callback'
-    | '/api/gsc/oauth/callback'
+    | '/api/integrations/google/callback'
+    | '/api/integrations/google/start'
     | '/p/$projectId'
     | '/p/$projectId/rank-tracking/$configId'
     | '/p/$projectId/settings/context'
@@ -627,8 +629,8 @@ export interface FileRouteTypes {
     | '/_project/p/$projectId/saved'
     | '/_project/p/$projectId/search-performance'
     | '/_project/p/$projectId/settings'
-    | '/api/ga4/oauth/callback'
-    | '/api/gsc/oauth/callback'
+    | '/api/integrations/google/callback'
+    | '/api/integrations/google/start'
     | '/_project/p/$projectId/'
     | '/_project/p/$projectId/rank-tracking/$configId'
     | '/_project/p/$projectId/settings/context'
@@ -653,8 +655,8 @@ export interface RootRouteChildren {
   ApiHealthRoute: typeof ApiHealthRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiAutumnSplatRoute: typeof ApiAutumnSplatRoute
-  ApiGa4OauthCallbackRoute: typeof ApiGa4OauthCallbackRoute
-  ApiGscOauthCallbackRoute: typeof ApiGscOauthCallbackRoute
+  ApiIntegrationsGoogleCallbackRoute: typeof ApiIntegrationsGoogleCallbackRoute
+  ApiIntegrationsGoogleStartRoute: typeof ApiIntegrationsGoogleStartRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -883,18 +885,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectPProjectIdIndexRouteImport
       parentRoute: typeof ProjectPProjectIdRouteRoute
     }
-    '/api/gsc/oauth/callback': {
-      id: '/api/gsc/oauth/callback'
-      path: '/api/gsc/oauth/callback'
-      fullPath: '/api/gsc/oauth/callback'
-      preLoaderRoute: typeof ApiGscOauthCallbackRouteImport
+    '/api/integrations/google/start': {
+      id: '/api/integrations/google/start'
+      path: '/api/integrations/google/start'
+      fullPath: '/api/integrations/google/start'
+      preLoaderRoute: typeof ApiIntegrationsGoogleStartRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/ga4/oauth/callback': {
-      id: '/api/ga4/oauth/callback'
-      path: '/api/ga4/oauth/callback'
-      fullPath: '/api/ga4/oauth/callback'
-      preLoaderRoute: typeof ApiGa4OauthCallbackRouteImport
+    '/api/integrations/google/callback': {
+      id: '/api/integrations/google/callback'
+      path: '/api/integrations/google/callback'
+      fullPath: '/api/integrations/google/callback'
+      preLoaderRoute: typeof ApiIntegrationsGoogleCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_project/p/$projectId/settings': {
@@ -1218,8 +1220,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiHealthRoute: ApiHealthRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiAutumnSplatRoute: ApiAutumnSplatRoute,
-  ApiGa4OauthCallbackRoute: ApiGa4OauthCallbackRoute,
-  ApiGscOauthCallbackRoute: ApiGscOauthCallbackRoute,
+  ApiIntegrationsGoogleCallbackRoute: ApiIntegrationsGoogleCallbackRoute,
+  ApiIntegrationsGoogleStartRoute: ApiIntegrationsGoogleStartRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

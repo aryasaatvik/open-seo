@@ -30,13 +30,11 @@ import { alias } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { z } from "zod";
-import { GA4_OAUTH_PROVIDER_ID } from "../src/shared/ga4";
 import {
   GDPR_STORAGE_ERASURE_PATH,
   signGdprErasureRequest,
   type GdprStorageErasurePayload,
 } from "../src/shared/gdpr-erasure";
-import { GSC_OAUTH_PROVIDER_ID } from "../src/shared/gsc";
 import { loadLocalEnv, parseArgs } from "./cli-utils";
 // The Node-safe raw barrel (not ../src/db/schema, the provider-aware one,
 // which imports cloudflare:workers).
@@ -196,35 +194,6 @@ async function buildInventory(db: Db, user: UserRow) {
           .orderBy(schema.auditLighthouseResults.r2Key);
   const r2Keys = r2Rows.flatMap((row) => (row.r2Key ? [row.r2Key] : []));
 
-  const googleAccountRows = await db
-    .selectDistinct({
-      providerId: schema.account.providerId,
-      accountId: schema.account.accountId,
-    })
-    .from(schema.account)
-    .where(
-      and(
-        eq(schema.account.userId, user.id),
-        inArray(schema.account.providerId, [
-          GSC_OAUTH_PROVIDER_ID,
-          GA4_OAUTH_PROVIDER_ID,
-        ]),
-      ),
-    )
-    .orderBy(schema.account.providerId, schema.account.accountId);
-  // The where clause already restricts providerId to the two Google
-  // providers; the predicate narrows the column's string type to match the
-  // erasure payload's enum.
-  const isGoogleProviderId = (
-    value: string,
-  ): value is typeof GSC_OAUTH_PROVIDER_ID | typeof GA4_OAUTH_PROVIDER_ID =>
-    value === GSC_OAUTH_PROVIDER_ID || value === GA4_OAUTH_PROVIDER_ID;
-  const googleAccounts = googleAccountRows.flatMap((row) =>
-    isGoogleProviderId(row.providerId)
-      ? [{ providerId: row.providerId, accountId: row.accountId }]
-      : [],
-  );
-
   const activeAuditWorkflows =
     projectIds.length === 0
       ? []
@@ -297,14 +266,6 @@ async function buildInventory(db: Db, user: UserRow) {
       schema.audits,
       eq(schema.audits.startedByUserId, user.id),
     ),
-    gsc_connections: await db.$count(
-      schema.gscConnections,
-      eq(schema.gscConnections.connectedByUserId, user.id),
-    ),
-    ga4_connections: await db.$count(
-      schema.ga4Connections,
-      eq(schema.ga4Connections.connectedByUserId, user.id),
-    ),
     api_keys: await db.$count(
       schema.apikey,
       eq(schema.apikey.referenceId, user.id),
@@ -317,7 +278,6 @@ async function buildInventory(db: Db, user: UserRow) {
     samSessionIds: samSessions.map((row) => row.id),
     auditIds: audits.map((row) => row.id),
     r2Keys,
-    googleAccounts,
     activeAuditWorkflowIds: activeAuditWorkflows.map((row) => row.id),
     activeRankWorkflowIds: activeRankWorkflows.map((row) => row.id),
     databaseCounts,
@@ -481,15 +441,8 @@ async function erasePostgres(db: Db, user: UserRow, organizationIds: string[]) {
           eq(schema.verification.value, user.id),
         ),
       );
-    // These columns intentionally have no user FK. Remove connection records
-    // and anonymize retained audit attribution even if the user left that
-    // workspace before making this request.
-    await tx
-      .delete(schema.gscConnections)
-      .where(eq(schema.gscConnections.connectedByUserId, user.id));
-    await tx
-      .delete(schema.ga4Connections)
-      .where(eq(schema.ga4Connections.connectedByUserId, user.id));
+    // Google property bindings belong to projects (cascade) and the Google
+    // grant itself lives in the integration gateway, not in a user row.
     // apikey.reference_id mirrors the plugin's polymorphic schema and has no
     // user FK, so keys don't cascade with the user row.
     await tx
@@ -589,7 +542,6 @@ async function main() {
         activeRankWorkflows: inventory.activeRankWorkflowIds.length,
       },
       external: {
-        googleAccounts: inventory.googleAccounts.length,
         loopsContact: true,
         postHogDistinctId: user.id,
         autumnCustomersAndStripeCustomers: inventory.organizations.length,
@@ -630,7 +582,6 @@ async function main() {
       activeAuditWorkflowIds: inventory.activeAuditWorkflowIds,
       activeRankWorkflowIds: inventory.activeRankWorkflowIds,
       r2Keys: inventory.r2Keys,
-      googleAccounts: inventory.googleAccounts,
     });
     await erasePostgres(db, user, organizationIds);
     const postgresVerification = await verifyPostgres(

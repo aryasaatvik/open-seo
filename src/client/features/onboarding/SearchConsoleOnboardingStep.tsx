@@ -4,12 +4,8 @@ import { Check } from "lucide-react";
 import { toast } from "sonner";
 import { GoogleGlyph } from "@/client/features/gsc/GoogleGlyph";
 import { GoogleLinkErrorAlert } from "@/client/features/integrations/GoogleLinkErrorAlert";
-import { SelfHostedSetupWarning } from "@/client/features/gsc/SelfHostedSetupWarning";
-import {
-  SitePicker,
-  type GscSiteSelection,
-} from "@/client/features/gsc/SitePicker";
-import { startGoogleLink } from "@/client/features/integrations/startGoogleLink";
+import { SitePicker } from "@/client/features/gsc/SitePicker";
+import { startGoogleConnect } from "@/client/features/integrations/googleConnect";
 import { getStandardErrorMessage } from "@/client/lib/error-messages";
 import { captureClientEvent } from "@/client/lib/posthog";
 import { ProjectMarketFields } from "@/client/features/projects/ProjectMarketFields";
@@ -21,7 +17,7 @@ import {
 } from "@/serverFunctions/gsc";
 import { getProjects, setProjectMarket } from "@/serverFunctions/projects";
 
-const GRANT_STATUS_KEY = ["gscGrantStatus"];
+const GOOGLE_STATUS_KEY = ["googleConnectionStatus"];
 
 /**
  * Onboarding step for connecting Google Search Console: link the account-level
@@ -106,9 +102,7 @@ function DefaultMarketPicker({
 /** Connect + pick-a-property flow, scoped to a known project. */
 function GscConnect({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
-  const [selection, setSelection] = React.useState<GscSiteSelection | null>(
-    null,
-  );
+  const [selection, setSelection] = React.useState<string | null>(null);
 
   const connectionKey = ["gscConnection", projectId];
   const connectionQuery = useQuery({
@@ -117,52 +111,35 @@ function GscConnect({ projectId }: { projectId: string }) {
   });
   const connection = connectionQuery.data;
   const connected = Boolean(connection?.connected);
-  const hasGrant = Boolean(connection?.currentUserHasGrant);
-  const needsSetup =
-    connectionQuery.isSuccess && !connection?.googleOAuthConfigured;
+  const googleConnected = Boolean(connection?.googleConnected);
 
   const sitesQuery = useQuery({
     queryKey: ["gscSites", projectId],
     queryFn: () => listGscSites({ data: { projectId } }),
-    enabled: hasGrant && !connected && !needsSetup,
+    enabled: googleConnected && !connected,
   });
-  const accounts = React.useMemo(
-    () => sitesQuery.data?.accounts ?? [],
-    [sitesQuery.data?.accounts],
+  const sites = React.useMemo(
+    () => sitesQuery.data?.sites ?? [],
+    [sitesQuery.data?.sites],
   );
-  const requiresReconnect = accounts.some(
-    (account) => account.requiresReconnect,
-  );
-
-  React.useEffect(() => {
-    if (!requiresReconnect) return;
-
-    void queryClient.invalidateQueries({
-      queryKey: ["gscConnection", projectId],
-    });
-    void queryClient.invalidateQueries({ queryKey: GRANT_STATUS_KEY });
-  }, [requiresReconnect, queryClient, projectId]);
 
   const setSiteMutation = useMutation({
-    mutationFn: (selected: GscSiteSelection) =>
-      setGscSite({ data: { projectId, ...selected } }),
+    mutationFn: (siteUrl: string) =>
+      setGscSite({ data: { projectId, siteUrl } }),
     onSuccess: () => {
       captureClientEvent("gsc:property_select");
       void queryClient.invalidateQueries({ queryKey: connectionKey });
+      void queryClient.invalidateQueries({ queryKey: GOOGLE_STATUS_KEY });
     },
     onError: (error) => toast.error(getStandardErrorMessage(error)),
   });
 
   const handleConnect = () => {
     captureClientEvent("onboarding:gsc_connect_clicked");
-    void startGoogleLink("gsc", window.location.href);
+    startGoogleConnect("gsc");
   };
 
   if (connectionQuery.isLoading) return <Checking />;
-
-  if (needsSetup) {
-    return <SelfHostedSetupWarning />;
-  }
 
   if (connected) {
     return (
@@ -177,14 +154,16 @@ function GscConnect({ projectId }: { projectId: string }) {
     );
   }
 
-  if (hasGrant) {
+  if (googleConnected) {
     return (
       <div className="space-y-4">
         <GoogleLinkErrorAlert provider="gsc" />
         <SitePicker
           loading={sitesQuery.isLoading}
           error={sitesQuery.isError}
-          accounts={accounts}
+          requiresReconnect={Boolean(sitesQuery.data?.requiresReconnect)}
+          email={sitesQuery.data?.email ?? null}
+          sites={sites}
           selection={selection}
           onSelect={setSelection}
           onSave={() => selection && setSiteMutation.mutate(selection)}

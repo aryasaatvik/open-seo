@@ -1,4 +1,3 @@
-import { getAuth } from "@/lib/auth";
 import type { OnboardingChatAgent } from "@/server/features/onboarding/OnboardingChatAgent";
 import type { SamChatAgent } from "@/server/features/sam/SamChatAgent";
 import { captureServerError } from "@/server/lib/posthog";
@@ -18,14 +17,7 @@ import {
 
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
-const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 const PROMPT_CACHE_PREFIX = cacheObjectPrefix(AI_SEARCH_PROMPT_CACHE_NAMESPACE);
-
-type GoogleRevocationResult = {
-  providerId: string;
-  accountId: string;
-  status: "revoked" | "token_unavailable";
-};
 
 function timingSafeEqual(left: string, right: string): boolean {
   const leftBytes = new TextEncoder().encode(left);
@@ -136,42 +128,6 @@ async function deleteOrganizationPromptCaches(
   return keys.length;
 }
 
-async function revokeGoogleAccount(
-  userId: string,
-  account: GdprStorageErasurePayload["googleAccounts"][number],
-): Promise<GoogleRevocationResult> {
-  let accessToken: string | undefined;
-  try {
-    const result = await getAuth().api.getAccessToken({
-      body: {
-        userId,
-        providerId: account.providerId,
-        accountId: account.accountId,
-      },
-    });
-    accessToken = result?.accessToken;
-  } catch {
-    // If Better Auth cannot mint a token, the locally stored grant is no longer
-    // usable. The Postgres transaction still removes its encrypted token row.
-    return { ...account, status: "token_unavailable" };
-  }
-  if (!accessToken) return { ...account, status: "token_unavailable" };
-
-  const response = await fetch(GOOGLE_REVOKE_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ token: accessToken }),
-  });
-  // Google uses invalid_token for an already-revoked token. Either response
-  // leaves OpenSEO without a live upstream grant once the local row is erased.
-  if (!response.ok && response.status !== 400) {
-    throw new Error(
-      `Google token revocation failed for ${account.providerId}/${account.accountId}: ${response.status}`,
-    );
-  }
-  return { ...account, status: "revoked" };
-}
-
 async function eraseStorage(env: Env, payload: GdprStorageErasurePayload) {
   // Stop live workflows first so a running crawl can't rewrite a scratchpad
   // after it is wiped.
@@ -183,11 +139,6 @@ async function eraseStorage(env: Env, payload: GdprStorageErasurePayload) {
     env.RANK_CHECK_WORKFLOW,
     payload.activeRankWorkflowIds,
   );
-
-  const googleRevocations: GoogleRevocationResult[] = [];
-  for (const account of payload.googleAccounts) {
-    googleRevocations.push(await revokeGoogleAccount(payload.userId, account));
-  }
 
   // env.d.ts declares the DO bindings untyped (ambient contexts can't import
   // the classes); narrow here so the erasure RPCs are typed.
@@ -250,7 +201,6 @@ async function eraseStorage(env: Env, payload: GdprStorageErasurePayload) {
     },
     r2Objects: payload.r2Keys.length,
     promptCacheObjects,
-    googleRevocations,
   };
 }
 

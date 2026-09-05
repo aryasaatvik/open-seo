@@ -91,8 +91,6 @@ async function getOrganicOverview(
     trend,
   });
   const client = createGa4DataClient({
-    userId: connection.connectedByUserId,
-    ga4AccountId: connection.ga4AccountId,
     propertyId: connection.propertyId,
   });
 

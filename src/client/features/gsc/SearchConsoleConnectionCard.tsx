@@ -1,19 +1,14 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { isHostedClientAuthMode } from "@/lib/auth-mode";
 import { getStandardErrorMessage } from "@/client/lib/error-messages";
 import { captureClientEvent } from "@/client/lib/posthog";
 import { GoogleGlyph } from "@/client/features/gsc/GoogleGlyph";
 import { GoogleLinkErrorAlert } from "@/client/features/integrations/GoogleLinkErrorAlert";
 import { IntegrationConnectionCard } from "@/client/features/integrations/IntegrationConnectionCard";
 import { GoogleSearchConsoleLogo } from "@/client/features/integrations/GoogleProductLogos";
-import { SelfHostedSetupWarning } from "@/client/features/gsc/SelfHostedSetupWarning";
-import {
-  SitePicker,
-  type GscSiteSelection,
-} from "@/client/features/gsc/SitePicker";
-import { startGoogleLink } from "@/client/features/integrations/startGoogleLink";
+import { SitePicker } from "@/client/features/gsc/SitePicker";
+import { startGoogleConnect } from "@/client/features/integrations/googleConnect";
 import {
   disconnectGsc,
   getGscConnection,
@@ -21,19 +16,16 @@ import {
   setGscSite,
 } from "@/serverFunctions/gsc";
 
-const GRANT_STATUS_KEY = ["gscGrantStatus"];
+const GOOGLE_STATUS_KEY = ["googleConnectionStatus"];
 
 export function SearchConsoleConnectionCard({
   projectId,
 }: {
   projectId: string;
 }) {
-  const hosted = isHostedClientAuthMode();
   const queryClient = useQueryClient();
   const [picking, setPicking] = React.useState(false);
-  const [selection, setSelection] = React.useState<GscSiteSelection | null>(
-    null,
-  );
+  const [selection, setSelection] = React.useState<string | null>(null);
 
   const connectionKey = ["gscConnection", projectId];
   const connectionQuery = useQuery({
@@ -42,71 +34,53 @@ export function SearchConsoleConnectionCard({
   });
   const connection = connectionQuery.data;
   const connected = Boolean(connection?.connected);
-  const selfHostedNeedsSetup =
-    !hosted && connectionQuery.isSuccess && !connection?.googleOAuthConfigured;
 
-  const showPicker = picking || (connection?.currentUserHasGrant && !connected);
+  const showPicker = picking || (connection?.googleConnected && !connected);
   const sitesQuery = useQuery({
     queryKey: ["gscSites", projectId],
     queryFn: () => listGscSites({ data: { projectId } }),
-    enabled: Boolean(showPicker && !selfHostedNeedsSetup),
+    enabled: Boolean(showPicker),
   });
-  const accounts = React.useMemo(
-    () => sitesQuery.data?.accounts ?? [],
-    [sitesQuery.data?.accounts],
+  const sites = React.useMemo(
+    () => sitesQuery.data?.sites ?? [],
+    [sitesQuery.data?.sites],
   );
-  const requiresReconnect = accounts.some(
-    (account) => account.requiresReconnect,
-  );
-
-  React.useEffect(() => {
-    if (!requiresReconnect) return;
-
-    void queryClient.invalidateQueries({
-      queryKey: ["gscConnection", projectId],
-    });
-    void queryClient.invalidateQueries({ queryKey: GRANT_STATUS_KEY });
-  }, [requiresReconnect, queryClient, projectId]);
 
   React.useEffect(() => {
     if (selection) return;
-    for (const account of accounts) {
-      const selectedSite = account.sites.find((site) => site.isSelected);
-      if (selectedSite) {
-        setSelection({
-          accountId: account.accountId,
-          siteUrl: selectedSite.siteUrl,
-        });
-        return;
-      }
-    }
-  }, [accounts, selection]);
+    const selectedSite = sites.find((site) => site.isSelected);
+    if (selectedSite) setSelection(selectedSite.siteUrl);
+  }, [sites, selection]);
+
+  const invalidateSearchState = () => {
+    void queryClient.invalidateQueries({ queryKey: connectionKey });
+    void queryClient.invalidateQueries({ queryKey: GOOGLE_STATUS_KEY });
+    // The Search Performance report caches {connected:false}; refresh it so
+    // the page shows data right after connecting instead of the stale card.
+    void queryClient.invalidateQueries({
+      queryKey: ["searchPerformance", projectId],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["searchPerformanceTable", projectId],
+    });
+    // The dashboard embeds this card and swaps it for the Search
+    // performance stats card once activation reports the connection.
+    void queryClient.invalidateQueries({
+      queryKey: ["dashboardActivation", projectId],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["dashboardGscReport", projectId],
+    });
+  };
 
   const setSiteMutation = useMutation({
-    mutationFn: (selected: GscSiteSelection) =>
-      setGscSite({ data: { projectId, ...selected } }),
+    mutationFn: (siteUrl: string) =>
+      setGscSite({ data: { projectId, siteUrl } }),
     onSuccess: () => {
       captureClientEvent("gsc:property_select");
       toast.success("Search Console connected");
       setPicking(false);
-      void queryClient.invalidateQueries({ queryKey: connectionKey });
-      void queryClient.invalidateQueries({ queryKey: GRANT_STATUS_KEY });
-      // The Search Performance report caches {connected:false}; refresh it so
-      // the page shows data right after connecting instead of the stale card.
-      void queryClient.invalidateQueries({
-        queryKey: ["searchPerformance", projectId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["searchPerformanceTable", projectId],
-      });
-      // The dashboard embeds this card and swaps it for the Search
-      // performance stats card once activation reports the connection.
-      void queryClient.invalidateQueries({
-        queryKey: ["dashboardActivation", projectId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["dashboardGscReport", projectId],
-      });
+      invalidateSearchState();
     },
     onError: (error) => toast.error(getStandardErrorMessage(error)),
   });
@@ -117,27 +91,12 @@ export function SearchConsoleConnectionCard({
       toast.success("Search Console disconnected");
       setPicking(false);
       setSelection(null);
-      void queryClient.invalidateQueries({ queryKey: connectionKey });
-      // Disconnect can drop the account-level grant server-side; keep the
-      // shared grant-status cache (onboarding step + re-engagement nudge) honest.
-      void queryClient.invalidateQueries({ queryKey: GRANT_STATUS_KEY });
-      void queryClient.invalidateQueries({
-        queryKey: ["searchPerformance", projectId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["searchPerformanceTable", projectId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["dashboardActivation", projectId],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["dashboardGscReport", projectId],
-      });
+      invalidateSearchState();
     },
     onError: (error) => toast.error(getStandardErrorMessage(error)),
   });
 
-  const handleConnect = () => void startGoogleLink("gsc", window.location.href);
+  const handleConnect = () => startGoogleConnect("gsc");
 
   return (
     <IntegrationConnectionCard
@@ -146,11 +105,9 @@ export function SearchConsoleConnectionCard({
       status={
         connectionQuery.isLoading
           ? undefined
-          : selfHostedNeedsSetup
-            ? "setup_required"
-            : connected
-              ? "connected"
-              : "disconnected"
+          : connected
+            ? "connected"
+            : "disconnected"
       }
     >
       <GoogleLinkErrorAlert provider="gsc" className="mb-4" />
@@ -159,8 +116,6 @@ export function SearchConsoleConnectionCard({
           <span className="loading loading-spinner loading-sm" />
           Checking…
         </div>
-      ) : selfHostedNeedsSetup ? (
-        <SelfHostedSetupWarning />
       ) : connected && !picking ? (
         <ConnectedState
           siteUrl={connection?.siteUrl ?? ""}
@@ -176,7 +131,9 @@ export function SearchConsoleConnectionCard({
         <SitePicker
           loading={sitesQuery.isLoading}
           error={sitesQuery.isError}
-          accounts={accounts}
+          requiresReconnect={Boolean(sitesQuery.data?.requiresReconnect)}
+          email={sitesQuery.data?.email ?? null}
+          sites={sites}
           selection={selection}
           onSelect={setSelection}
           onSave={() => selection && setSiteMutation.mutate(selection)}
@@ -241,7 +198,7 @@ function ConnectedState({
           <p className="truncate font-mono text-sm">{siteUrl}</p>
           {connectedByEmail ? (
             <p className="truncate text-xs text-base-content/55">
-              Connected by {connectedByEmail}
+              Connected as {connectedByEmail}
             </p>
           ) : null}
         </div>

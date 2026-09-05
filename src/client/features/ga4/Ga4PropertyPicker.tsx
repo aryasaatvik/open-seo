@@ -1,24 +1,11 @@
 import { GoogleGlyph } from "@/client/features/gsc/GoogleGlyph";
-import { startGoogleLink } from "@/client/features/integrations/startGoogleLink";
+import { startGoogleConnect } from "@/client/features/integrations/googleConnect";
 
 type PropertyOption = {
   propertyId: string;
   displayName: string;
   accountDisplayName: string;
   isSelected: boolean;
-};
-
-type AccountOption = {
-  accountId: string;
-  email: string | null;
-  requiresReconnect: boolean;
-  propertiesUnavailable: boolean;
-  properties: PropertyOption[];
-};
-
-export type Ga4PropertySelection = {
-  accountId: string;
-  propertyId: string;
 };
 
 type SecondaryAction = {
@@ -31,7 +18,10 @@ type SecondaryAction = {
 export function Ga4PropertyPicker({
   loading,
   error,
-  accounts,
+  requiresReconnect,
+  propertiesUnavailable,
+  email,
+  properties,
   selection,
   onSelect,
   onSave,
@@ -41,9 +31,12 @@ export function Ga4PropertyPicker({
 }: {
   loading: boolean;
   error: boolean;
-  accounts: AccountOption[];
-  selection: Ga4PropertySelection | null;
-  onSelect: (selection: Ga4PropertySelection) => void;
+  requiresReconnect: boolean;
+  propertiesUnavailable: boolean;
+  email: string | null;
+  properties: PropertyOption[];
+  selection: string | null;
+  onSelect: (propertyId: string) => void;
   onSave: () => void;
   saving: boolean;
   onRetry: () => void;
@@ -79,10 +72,7 @@ export function Ga4PropertyPicker({
     );
   }
 
-  const allAccountsRequireReconnect =
-    accounts.length > 0 &&
-    accounts.every((account) => account.requiresReconnect);
-  if (allAccountsRequireReconnect) {
+  if (requiresReconnect) {
     return (
       <div className="space-y-3">
         <p className="text-sm text-error">
@@ -91,7 +81,7 @@ export function Ga4PropertyPicker({
         <div className="flex flex-wrap items-center gap-1">
           <GoogleConnectButton
             label="Reconnect with Google"
-            onClick={() => void startGoogleLink("ga4", window.location.href)}
+            onClick={() => startGoogleConnect("ga4")}
           />
           {secondaryAction ? (
             <SecondaryActionButton action={secondaryAction} />
@@ -101,32 +91,12 @@ export function Ga4PropertyPicker({
     );
   }
 
-  const usableAccounts = accounts.filter(
-    (account) => !account.requiresReconnect && !account.propertiesUnavailable,
-  );
-  const options = usableAccounts.flatMap((account) =>
-    account.properties.map((property) => ({
-      accountId: account.accountId,
-      propertyId: property.propertyId,
-    })),
-  );
-  const selectedIndex = selection
-    ? options.findIndex(
-        (option) =>
-          option.accountId === selection.accountId &&
-          option.propertyId === selection.propertyId,
-      )
-    : -1;
-  const hasUnavailableAccounts = accounts.some(
-    (account) => account.propertiesUnavailable,
-  );
-
   return (
     <div className="space-y-4">
-      {hasUnavailableAccounts ? (
+      {propertiesUnavailable ? (
         <p className="text-sm text-warning">
-          Some properties couldn&rsquo;t be loaded. Check that the Analytics
-          Admin API is enabled and that this Google account has property access.
+          Properties couldn&rsquo;t be loaded. Check that the Analytics Admin
+          API is enabled and that this Google account has property access.
         </p>
       ) : null}
       <label className="block">
@@ -135,41 +105,26 @@ export function Ga4PropertyPicker({
         </span>
         <select
           className="select select-bordered w-full max-w-md"
-          value={selectedIndex >= 0 ? String(selectedIndex) : ""}
-          onChange={(event) => {
-            const option = options[Number(event.target.value)];
-            if (option) onSelect(option);
-          }}
+          value={selection ?? ""}
+          onChange={(event) => onSelect(event.target.value)}
         >
           <option value="" disabled>
             Select a property…
           </option>
-          {usableAccounts.map((account) => (
-            <optgroup
-              key={account.accountId}
-              label={account.email ?? "Google account"}
-            >
-              {account.properties.length === 0 ? (
-                <option disabled>No properties</option>
-              ) : (
-                account.properties.map((property) => {
-                  const index = options.findIndex(
-                    (option) =>
-                      option.accountId === account.accountId &&
-                      option.propertyId === property.propertyId,
-                  );
-                  return (
-                    <option key={property.propertyId} value={index}>
-                      {property.accountDisplayName} · {property.displayName}
-                    </option>
-                  );
-                })
-              )}
-            </optgroup>
-          ))}
+          <optgroup label={email ?? "Google account"}>
+            {properties.length === 0 ? (
+              <option disabled>No properties</option>
+            ) : (
+              properties.map((property) => (
+                <option key={property.propertyId} value={property.propertyId}>
+                  {property.accountDisplayName} · {property.displayName}
+                </option>
+              ))
+            )}
+          </optgroup>
         </select>
       </label>
-      {options.length === 0 && !hasUnavailableAccounts ? (
+      {properties.length === 0 && !propertiesUnavailable ? (
         <p className="text-sm text-base-content/60">
           No Google Analytics properties are available for this account.
         </p>
@@ -179,16 +134,16 @@ export function Ga4PropertyPicker({
           type="button"
           className="btn btn-primary btn-sm"
           onClick={onSave}
-          disabled={selectedIndex < 0 || saving}
+          disabled={!selection || saving}
         >
           {saving ? "Saving…" : "Save property"}
         </button>
         <button
           type="button"
           className="btn btn-ghost btn-sm"
-          onClick={() => void startGoogleLink("ga4", window.location.href)}
+          onClick={() => startGoogleConnect("ga4")}
         >
-          Connect another Google account
+          Use a different Google account
         </button>
         {secondaryAction ? (
           <SecondaryActionButton action={secondaryAction} />

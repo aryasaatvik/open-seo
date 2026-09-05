@@ -1,8 +1,8 @@
-import { and, eq } from "drizzle-orm";
-import { db } from "@/db";
-import { account } from "@/db/schema";
-import { GSC_OAUTH_PROVIDER_ID } from "@/shared/gsc";
 import { AppError } from "@/server/lib/errors";
+import {
+  GoogleNotConnectedError,
+  googleConnectionStatus,
+} from "@/server/lib/executor/google";
 import {
   createGscClient,
   type GscSite,
@@ -26,6 +26,7 @@ import type {
   GscSearchAnalyticsRequest,
   GscSearchAnalyticsRow,
 } from "@/server/lib/gscClient";
+import { GOOGLE_SEARCH_CONSOLE_INTEGRATION } from "@/shared/integration-addresses";
 
 const SITE_UNVERIFIED_PERMISSION = "siteUnverifiedUser";
 
@@ -37,130 +38,63 @@ type GscPerformanceResult = {
 };
 
 type GscSiteListResult = {
-  accounts: Array<{
-    accountId: string;
-    email: string | null;
-    requiresReconnect: boolean;
-    sites: GscSite[];
-  }>;
+  /** The grant is gone or expired past refresh; the user has to reconnect. */
+  requiresReconnect: boolean;
+  email: string | null;
+  sites: GscSite[];
 };
 
-/** Thrown when a project has no connected GSC property. */
 async function getConnection(projectId: string): Promise<GscConnection | null> {
   return GscConnectionRepository.getByProjectId(projectId);
 }
 
-/** Whether this user has linked a google-search-console grant (regardless of
- *  whether they've picked a property yet). Drives the connect-vs-pick UI. */
-async function userHasGrant(userId: string): Promise<boolean> {
-  const rows = await db
-    .select({ id: account.id })
-    .from(account)
-    .where(
-      and(
-        eq(account.userId, userId),
-        eq(account.providerId, GSC_OAUTH_PROVIDER_ID),
-      ),
-    )
-    .limit(1);
-  return rows.length > 0;
+/** The org-level Google grant held by the integration gateway. */
+async function getGoogleConnection() {
+  return googleConnectionStatus(GOOGLE_SEARCH_CONSOLE_INTEGRATION);
 }
 
-async function listGrantsForUser(userId: string) {
-  return db
-    .select({ id: account.id, accountId: account.accountId })
-    .from(account)
-    .where(
-      and(
-        eq(account.userId, userId),
-        eq(account.providerId, GSC_OAUTH_PROVIDER_ID),
-      ),
-    );
-}
-
-/** Expected ways a stored grant fails to reach Search Console: no token could be
- *  minted (refresh token revoked or expired), or Google rejected the call
- *  (401/403). These surface a reconnect prompt without fault logging. */
+/** Expected ways the stored grant fails to reach Search Console: the gateway
+ *  could not mint a token (refresh token revoked or expired), or Google
+ *  rejected the call (401/403). These surface a reconnect prompt without
+ *  fault logging. */
 export function isExpectedGrantFailure(error: unknown): boolean {
   if (error instanceof GscTokenError) return true;
+  if (error instanceof GoogleNotConnectedError) return true;
   return (
     error instanceof GscApiError &&
     (error.status === 401 || error.status === 403)
   );
 }
 
-async function listSitesForUserWithGrantStatus(
-  userId: string,
-): Promise<GscSiteListResult> {
-  const grants = await listGrantsForUser(userId);
-  const accounts = await Promise.all(
-    grants.map(async (grant) => {
-      const client = createGscClient({
-        userId,
-        gscAccountId: grant.accountId,
-      });
-
-      try {
-        const sites = await client.listSites();
-        let email: string | null = null;
-        try {
-          email = await client.getUserInfoEmail();
-        } catch {
-          email = null;
-        }
-        return {
-          accountId: grant.accountId,
-          email,
-          requiresReconnect: false,
-          sites,
-        };
-      } catch (error) {
-        if (!isExpectedGrantFailure(error)) {
-          console.error(
-            "Failed to list Search Console sites for account",
-            grant.accountId,
-            error,
-          );
-        }
-        return {
-          accountId: grant.accountId,
-          email: null,
-          requiresReconnect: true,
-          sites: [],
-        };
-      }
-    }),
-  );
-  return { accounts };
+async function listSites(): Promise<GscSiteListResult> {
+  const google = await getGoogleConnection();
+  if (!google.connected) {
+    return { requiresReconnect: true, email: null, sites: [] };
+  }
+  try {
+    const sites = await createGscClient().listSites();
+    return { requiresReconnect: false, email: google.email, sites };
+  } catch (error) {
+    if (!isExpectedGrantFailure(error)) {
+      console.error("Failed to list Search Console sites", error);
+    }
+    return { requiresReconnect: true, email: google.email, sites: [] };
+  }
 }
 
 /** Map a verified property to a project. Rejects unverified properties and
- *  properties not present on the connector's grant. */
+ *  properties not present on the grant. */
 async function setSite(input: {
   projectId: string;
   organizationId: string;
   siteUrl: string;
-  accountId: string;
-  userId: string;
 }): Promise<GscConnection> {
-  const grants = await listGrantsForUser(input.userId);
-  if (!grants.some((grant) => grant.accountId === input.accountId)) {
-    throw new AppError(
-      "NOT_FOUND",
-      "That Google account isn't connected to your OpenSEO account.",
-    );
-  }
-
-  const client = createGscClient({
-    userId: input.userId,
-    gscAccountId: input.accountId,
-  });
-  const sites = await client.listSites();
+  const sites = await createGscClient().listSites();
   const match = sites.find((s) => s.siteUrl === input.siteUrl);
   if (!match) {
     throw new AppError(
       "NOT_FOUND",
-      "That Search Console property isn't available on your connected Google account.",
+      "That Search Console property isn't available on the connected Google account.",
     );
   }
   if (match.permissionLevel === SITE_UNVERIFIED_PERMISSION) {
@@ -169,57 +103,17 @@ async function setSite(input: {
       "You don't have verified access to that Search Console property.",
     );
   }
-  let connectedAccountEmail: string | null = null;
-  try {
-    connectedAccountEmail = await client.getUserInfoEmail();
-  } catch {
-    connectedAccountEmail = null;
-  }
   return GscConnectionRepository.upsert({
     projectId: input.projectId,
     organizationId: input.organizationId,
     siteUrl: input.siteUrl,
-    connectedByUserId: input.userId,
-    gscAccountId: input.accountId,
-    connectedAccountEmail,
   });
 }
 
-async function unlinkUserGrant(
-  userId: string,
-  gscAccountId: string,
-): Promise<void> {
-  await db
-    .delete(account)
-    .where(
-      and(
-        eq(account.userId, userId),
-        eq(account.providerId, GSC_OAUTH_PROVIDER_ID),
-        eq(account.accountId, gscAccountId),
-      ),
-    );
-}
-
-async function disconnect(input: {
-  projectId: string;
-  userId: string;
-}): Promise<void> {
-  const connection = await GscConnectionRepository.getByProjectId(
-    input.projectId,
-  );
+/** Unbind the property from the project. The Google grant itself stays in the
+ *  gateway for the other projects that use it. */
+async function disconnect(input: { projectId: string }): Promise<void> {
   await GscConnectionRepository.deleteByProjectId(input.projectId);
-  if (
-    connection?.gscAccountId &&
-    connection.connectedByUserId === input.userId
-  ) {
-    const stillUsed = await GscConnectionRepository.existsForConnectorAccount(
-      input.userId,
-      connection.gscAccountId,
-    );
-    if (!stillUsed) {
-      await unlinkUserGrant(input.userId, connection.gscAccountId);
-    }
-  }
 }
 
 /** Pass-through of GSC `searchAnalytics.query` for a project's connected property. */
@@ -233,14 +127,13 @@ async function getPerformance(
     throw new GscNotConnectedError(input.projectId);
   }
   const request = buildSearchAnalyticsRequest(input);
-  const client = createGscClient({
-    userId: connection.connectedByUserId,
-    gscAccountId: connection.gscAccountId ?? undefined,
-  });
-  const rows = await client.querySearchAnalytics(connection.siteUrl, request);
+  const [rows, google] = await Promise.all([
+    createGscClient().querySearchAnalytics(connection.siteUrl, request),
+    getGoogleConnection(),
+  ]);
   return {
     siteUrl: connection.siteUrl,
-    connectedBy: connection.connectedAccountEmail,
+    connectedBy: google.email,
     request,
     rows,
   };
@@ -273,10 +166,7 @@ async function inspectUrls(input: {
   if (!connection) {
     throw new GscNotConnectedError(input.projectId);
   }
-  const client = createGscClient({
-    userId: connection.connectedByUserId,
-    gscAccountId: connection.gscAccountId ?? undefined,
-  });
+  const client = createGscClient();
   const results: GscUrlInspection[] = [];
   for (const url of input.urls) {
     try {
@@ -287,7 +177,12 @@ async function inspectUrls(input: {
       );
       results.push({ url, result });
     } catch (error) {
-      if (error instanceof GscTokenError) throw error;
+      if (
+        error instanceof GscTokenError ||
+        error instanceof GoogleNotConnectedError
+      ) {
+        throw error;
+      }
       results.push({
         url,
         result: null,
@@ -295,17 +190,18 @@ async function inspectUrls(input: {
       });
     }
   }
+  const google = await getGoogleConnection();
   return {
     siteUrl: connection.siteUrl,
-    connectedBy: connection.connectedAccountEmail,
+    connectedBy: google.email,
     results,
   };
 }
 
 export const GscService = {
   getConnection,
-  userHasGrant,
-  listSitesForUserWithGrantStatus,
+  getGoogleConnection,
+  listSites,
   setSite,
   disconnect,
   getPerformance,

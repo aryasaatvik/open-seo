@@ -20,18 +20,11 @@ export const ga4Connections = pgTable(
     propertyDisplayName: text("property_display_name").notNull(),
     propertyTimeZone: text("property_time_zone").notNull(),
     propertyCurrencyCode: text("property_currency_code").notNull(),
-    connectedByUserId: text("connected_by_user_id").notNull(),
-    ga4AccountId: text("ga4_account_id").notNull(),
-    connectedAccountEmail: text("connected_account_email"),
     createdAt: text("created_at").notNull().default(isoNow),
     updatedAt: text("updated_at").notNull().default(isoNow),
   },
   (table) => [
     uniqueIndex("ga4_connections_project_idx").on(table.projectId),
     index("ga4_connections_organization_idx").on(table.organizationId),
-    index("ga4_connections_connector_idx").on(
-      table.connectedByUserId,
-      table.ga4AccountId,
-    ),
   ],
 );

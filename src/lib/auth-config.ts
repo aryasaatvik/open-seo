@@ -1,9 +1,6 @@
-import { env } from "cloudflare:workers";
-import { genericOAuth, organization } from "better-auth/plugins";
+import { organization } from "better-auth/plugins";
 import { baseAuthOptions } from "@/lib/auth-options";
 import { orgAccessControl, orgRoles } from "@/lib/org-permissions";
-import { GA4_OAUTH_PROVIDER_ID, GA4_OAUTH_SCOPES } from "@/shared/ga4";
-import { GSC_OAUTH_PROVIDER_ID, GSC_OAUTH_SCOPES } from "@/shared/gsc";
 
 type OrganizationOptions = NonNullable<Parameters<typeof organization>[0]>;
 
@@ -66,32 +63,6 @@ export function createBaseAuthConfig(options?: {
         // limiting is per-isolate).
         invitationLimit: 20,
         ...options?.organization,
-      }),
-      genericOAuth({
-        config: [
-          {
-            providerId: GSC_OAUTH_PROVIDER_ID,
-            clientId: env.GOOGLE_CLIENT_ID?.trim() ?? "",
-            clientSecret: env.GOOGLE_CLIENT_SECRET?.trim() ?? "",
-            discoveryUrl:
-              "https://accounts.google.com/.well-known/openid-configuration",
-            scopes: [...GSC_OAUTH_SCOPES],
-            accessType: "offline", // request a refresh token
-            prompt: "select_account consent",
-            pkce: true,
-          },
-          {
-            providerId: GA4_OAUTH_PROVIDER_ID,
-            clientId: env.GOOGLE_CLIENT_ID?.trim() ?? "",
-            clientSecret: env.GOOGLE_CLIENT_SECRET?.trim() ?? "",
-            discoveryUrl:
-              "https://accounts.google.com/.well-known/openid-configuration",
-            scopes: [...GA4_OAUTH_SCOPES],
-            accessType: "offline",
-            prompt: "select_account consent",
-            pkce: true,
-          },
-        ],
       }),
     ],
   };
