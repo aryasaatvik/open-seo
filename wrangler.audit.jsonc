@@ -50,6 +50,13 @@
   // wrangler.jsonc into this file too — both workers share the same D1/KV/R2
   // (no OAUTH_KV here; only the app worker runs OAuth), and miniflare derives
   // local storage filenames from these ids.
+  // Lighthouse runs reach DataForSEO through the integration gateway.
+  "services": [
+    {
+      "binding": "INTEGRATIONS",
+      "service": "open-seo-integrations",
+    },
+  ],
   "kv_namespaces": [
     {
       "binding": "KV",
