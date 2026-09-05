@@ -95,7 +95,7 @@ async function sha256Hex(value: string): Promise<string> {
   ).join("");
 }
 
-const ensureDataforseoConnection = (
+export const ensureDataforseoConnection = (
   executor: GatewayExecutor,
   db: D1Database,
   apiKey: string,

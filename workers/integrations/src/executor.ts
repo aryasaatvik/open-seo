@@ -15,6 +15,7 @@ import {
 import { openApiPlugin } from "@executor-js/plugin-openapi/core";
 import { googleDiscoveryAdapter } from "@executor-js/plugin-openapi/providers/google";
 import { makeR2BlobStore } from "./blob-store";
+import { fingerprintOf, prepareSchema } from "./schema";
 import { ensureSecretsTable, makeD1SecretProvider } from "./secrets";
 import { GOOGLE_INTEGRATIONS } from "./catalog";
 
@@ -38,7 +39,6 @@ const TENANT = Tenant.make("openseo");
 const NAMESPACE = "openseo_integrations";
 // FumaDB requires a semver string here.
 const SCHEMA_VERSION = "1.0.0";
-const FINGERPRINT_TABLE = `private_${NAMESPACE}_schema_fingerprint`;
 
 export const GOOGLE_OAUTH_CLIENT = "google";
 const GOOGLE_CALLBACK_PATH = "/api/integrations/google/callback";
@@ -48,80 +48,6 @@ const plugins = [
 ] as const;
 
 export type GatewayExecutor = Executor<typeof plugins>;
-
-async function fingerprintOf(statements: readonly string[]): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(statements.join("\0")),
-  );
-  return Array.from(new Uint8Array(digest), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
-}
-
-// The fingerprint row is written twice: `pending:<hash>` before any DDL runs,
-// then `<hash>` once the schema, the secrets table, and the marker are all in
-// place. A restart after an interrupted setup finds the pending row, skips
-// the collision check (the tables are ours), and reruns the idempotent DDL.
-const PENDING_PREFIX = "pending:";
-
-async function ensureFingerprintTable(db: D1Database): Promise<void> {
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS "${FINGERPRINT_TABLE}" (id text PRIMARY KEY NOT NULL, fingerprint text NOT NULL)`,
-    )
-    .run();
-}
-
-async function readFingerprint(db: D1Database): Promise<string | null> {
-  const exists = await db
-    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
-    .bind(FINGERPRINT_TABLE)
-    .first();
-  if (!exists) return null;
-  const row = await db
-    .prepare(
-      `SELECT fingerprint FROM "${FINGERPRINT_TABLE}" WHERE id = 'runtime'`,
-    )
-    .first<{ fingerprint: string }>();
-  return row?.fingerprint ?? null;
-}
-
-async function writeFingerprint(db: D1Database, value: string): Promise<void> {
-  await ensureFingerprintTable(db);
-  await db
-    .prepare(
-      `INSERT INTO "${FINGERPRINT_TABLE}" (id, fingerprint) VALUES ('runtime', ?)
-       ON CONFLICT(id) DO UPDATE SET fingerprint = excluded.fingerprint`,
-    )
-    .bind(value)
-    .run();
-}
-
-// Executor shares the app's D1. Before the first bring-up, refuse to run if
-// any table Executor is about to create already exists: that would be an
-// OpenSEO table with a colliding name, and `CREATE TABLE IF NOT EXISTS` would
-// silently adopt it. Once a fingerprint row exists, pending or final, the
-// tables are ours.
-async function assertNoTableCollision(
-  db: D1Database,
-  tableNames: readonly string[],
-): Promise<void> {
-  const placeholders = tableNames.map(() => "?").join(", ");
-  const { results } = await db
-    .prepare(
-      `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${placeholders})`,
-    )
-    .bind(...tableNames)
-    .all<{ name: string }>();
-  if (results.length > 0) {
-    throw new Error(
-      `Executor tables collide with existing tables in D1: ${results
-        .map((r) => r.name)
-        .join(", ")}. Rename the app tables or give Executor its own database.`,
-    );
-  }
-}
 
 function buildExecutor(
   env: GatewayEnv,
@@ -170,22 +96,19 @@ function buildExecutor(
         const schema = createDrizzleRuntimeSchemaFromTables(options);
         const drizzleDb = drizzle(env.DB, { schema });
 
-        const expected = await fingerprintOf(
-          createDrizzleRuntimeSchemaSqlFromTables(options),
-        );
-        const prepared = await readFingerprint(env.DB);
-        if (prepared !== expected) {
-          if (prepared === null) {
-            await assertNoTableCollision(env.DB, Object.keys(tables));
-            await writeFingerprint(env.DB, `${PENDING_PREFIX}${expected}`);
-          }
-          await ensureDrizzleRuntimeSchemaFromTables(
-            { run: (query) => drizzleDb.run(query) },
-            options,
-          );
-          await ensureSecretsTable(env.DB);
-          await writeFingerprint(env.DB, expected);
-        }
+        await prepareSchema(env.DB, NAMESPACE, {
+          tableNames: Object.keys(tables),
+          expectedFingerprint: await fingerprintOf(
+            createDrizzleRuntimeSchemaSqlFromTables(options),
+          ),
+          ensureSchema: async () => {
+            await ensureDrizzleRuntimeSchemaFromTables(
+              { run: (query) => drizzleDb.run(query) },
+              options,
+            );
+            await ensureSecretsTable(env.DB);
+          },
+        });
 
         const { db } = createExecutorFumaDb(drizzleDb, {
           ...options,
