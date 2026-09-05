@@ -58,7 +58,7 @@ Secrets live only in `.env.selfhost` (gitignored, mode 600). Dates and balances 
 | --- | --- | --- |
 | DataForSEO | account saatvik@aryalabs.ai, prepaid, no auto-recharge | `DATAFORSEO_API_KEY` (base64 `email:api-password`). Self-host mode has no spend guardrail; check with `pnpm billing:usage` |
 | OpenRouter | key named `OpenSEO`, personal account | `OPENROUTER_API_KEY`, optional `OPENROUTER_MODEL`. Powers SAM |
-| Google | GCP project `openseo-163576` (aryasaatvik@gmail.com), consent screen External/Testing, OAuth web client `OpenSEO` | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`. Callbacks `https://seo.arya.sh/api/gsc/oauth/callback` and `.../api/ga4/oauth/callback`. New Google accounts must be added as test users first |
+| Google | GCP project `openseo-163576` (aryasaatvik@gmail.com), consent screen External, published to Production and unverified, OAuth web client `OpenSEO` | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`. Callbacks `https://seo.arya.sh/api/gsc/oauth/callback` and `.../api/ga4/oauth/callback`. Any Google account can connect through the unverified-app interstitial; lifetime cap 100 grants. Branding homepage `https://arya.sh`, privacy URL `https://arya.sh/privacy` (no page exists; only needed if verification is ever submitted) |
 | Cloudflare | Arya Labs account, Workers Paid | alchemy profile `default`; Access allowlist `ACCESS_ALLOWED_EMAILS` |
 
 ## Read-only refresh
