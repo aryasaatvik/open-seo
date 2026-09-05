@@ -61,10 +61,9 @@ describe("integrations health check", () => {
   it("errors without calling the provider when the DataForSEO connection is missing", async () => {
     mocks.listConnections.mockResolvedValue([]);
 
-    await expect(integrationsCheck()).resolves.toMatchObject({
-      status: "error",
-      detail: expect.stringContaining("DATAFORSEO_API_KEY"),
-    });
+    const check = await integrationsCheck();
+    expect(check.status).toBe("error");
+    expect(check.detail).toContain("DATAFORSEO_API_KEY");
     expect(mocks.invokeTool).not.toHaveBeenCalled();
   });
 
@@ -74,10 +73,9 @@ describe("integrations health check", () => {
       error: { code: "upstream_status", message: "Unauthorized", status: 401 },
     });
 
-    await expect(integrationsCheck()).resolves.toMatchObject({
-      status: "error",
-      detail: expect.stringContaining("upstream_status 401"),
-    });
+    const check = await integrationsCheck();
+    expect(check.status).toBe("error");
+    expect(check.detail).toContain("upstream_status 401");
   });
 
   it("errors as unreachable when the gateway RPC throws", async () => {
@@ -86,10 +84,9 @@ describe("integrations health check", () => {
       .mockImplementation(() => undefined);
     mocks.listConnections.mockRejectedValue(new Error("binding missing"));
 
-    await expect(integrationsCheck()).resolves.toMatchObject({
-      status: "error",
-      detail: expect.stringContaining("unreachable"),
-    });
+    const check = await integrationsCheck();
+    expect(check.status).toBe("error");
+    expect(check.detail).toContain("unreachable");
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
   });
