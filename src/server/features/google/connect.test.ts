@@ -136,4 +136,26 @@ describe("Google connect flow", () => {
       "/p/1?google_link_error=ga4&error=organization_mismatch",
     );
   });
+
+  it("does not let a stale consent advance a different flow", async () => {
+    mocks.googleOAuthComplete.mockResolvedValue({
+      integration: "google_search_console",
+      name: "org_1",
+      identityLabel: "owner@example.com",
+      expiresAt: null,
+    });
+
+    const response = await handleGoogleConnectCallback(
+      new Request(`${ORIGIN}/api/integrations/google/callback?state=s&code=c`, {
+        headers: {
+          cookie: flowCookie({ provider: "ga4", returnTo: "/p/1", step: 0 }),
+        },
+      }),
+    );
+
+    expect(mocks.googleOAuthStart).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBe(
+      "/p/1?google_link_error=ga4&error=flow_mismatch",
+    );
+  });
 });

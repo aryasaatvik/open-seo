@@ -173,6 +173,13 @@ export async function handleGoogleConnectCallback(
       code,
     });
     forgetGoogleTools(connection.integration);
+    if (
+      connection.integration !== PROVIDER_INTEGRATIONS[flow.provider][flow.step]
+    ) {
+      // Every connect attempt shares one cookie, so a stale consent finishing
+      // after a newer flow started must not advance or complete that flow.
+      return redirect(failureLocation(flow, "flow_mismatch"), flowCookie(null));
+    }
     if (connection.name !== user.organizationId) {
       // The state was minted for another workspace (the user switched
       // mid-flow). The grant landed there; nothing here may act on it.
