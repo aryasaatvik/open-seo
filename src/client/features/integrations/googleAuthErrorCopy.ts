@@ -33,6 +33,12 @@ export function googleAuthErrorCopy(
         description:
           "Google Analytics needs the Admin and Data permissions from the same Google account. Try again and pick the same account on both Google screens.",
       };
+    case "organization_mismatch":
+      return {
+        title: `${what} landed in another workspace`,
+        description:
+          "The workspace changed while Google was open. The grant was saved for the workspace that started it; switch back to it, or start the connection again from this one.",
+      };
     case "account_already_linked_to_different_user":
       return {
         title: "Google account already connected",

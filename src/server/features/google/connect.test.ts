@@ -65,9 +65,8 @@ describe("Google connect flow", () => {
       "google_search_console",
       "org_1",
     );
-    expect(cookieFlow(response)).toMatchObject({
+    expect(cookieFlow(response)).toEqual({
       provider: "gsc",
-      organizationId: "org_1",
       returnTo: "/p/1/settings",
       step: 0,
     });
@@ -98,12 +97,7 @@ describe("Google connect flow", () => {
         expiresAt: null,
       },
     ]);
-    const flow = {
-      provider: "ga4",
-      organizationId: "org_1",
-      returnTo: "/p/1/settings",
-      step: 1,
-    };
+    const flow = { provider: "ga4", returnTo: "/p/1/settings", step: 1 };
 
     const response = await handleGoogleConnectCallback(
       new Request(`${ORIGIN}/api/integrations/google/callback?state=s&code=c`, {
@@ -117,6 +111,29 @@ describe("Google connect flow", () => {
     );
     expect(response.headers.get("location")).toBe(
       "/p/1/settings?google_link_error=ga4&error=account_mismatch",
+    );
+  });
+
+  it("refuses to act on a grant minted for another organization", async () => {
+    mocks.googleOAuthComplete.mockResolvedValue({
+      integration: "google_analytics_data",
+      name: "org_other",
+      identityLabel: "other@example.com",
+      expiresAt: null,
+    });
+
+    const response = await handleGoogleConnectCallback(
+      new Request(`${ORIGIN}/api/integrations/google/callback?state=s&code=c`, {
+        headers: {
+          cookie: flowCookie({ provider: "ga4", returnTo: "/p/1", step: 1 }),
+        },
+      }),
+    );
+
+    expect(mocks.listConnections).not.toHaveBeenCalled();
+    expect(mocks.removeConnection).not.toHaveBeenCalled();
+    expect(response.headers.get("location")).toBe(
+      "/p/1?google_link_error=ga4&error=organization_mismatch",
     );
   });
 });

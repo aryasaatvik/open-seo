@@ -30,11 +30,12 @@ const providerSchema = z.enum(["gsc", "ga4"]);
 // `state` belongs to the gateway, and Google only returns what it was given.
 const FLOW_COOKIE = "openseo_google_connect";
 const FLOW_TTL_SECONDS = 10 * 60;
+// The cookie is unsigned, so it carries nothing that scopes an operation:
+// the organization comes from the authenticated context on both legs, and
+// the minted connection (bound to the gateway's signed OAuth state) must
+// name that same organization before the callback touches anything.
 const flowSchema = z.object({
   provider: providerSchema,
-  /** The organization the grant is saved under, fixed at the start of the
-   *  flow so a mid-flow workspace switch cannot cross the wires. */
-  organizationId: z.string().min(1),
   returnTo: z.string().startsWith("/"),
   /** Index into PROVIDER_INTEGRATIONS[provider] of the consent in flight. */
   step: z.number().int().min(0),
@@ -84,14 +85,17 @@ function safeReturnTo(value: string | null): string {
   return normalized === "/" ? "/projects" : normalized;
 }
 
-async function beginStep(flow: Flow): Promise<Response> {
+async function beginStep(
+  flow: Flow,
+  organizationId: string,
+): Promise<Response> {
   const integration = PROVIDER_INTEGRATIONS[flow.provider][flow.step];
   if (!integration) {
     return redirect(flow.returnTo, flowCookie(null));
   }
   const { authorizationUrl } = await env.INTEGRATIONS.googleOAuthStart(
     integration,
-    flow.organizationId,
+    organizationId,
   );
   return redirect(authorizationUrl, flowCookie(flow));
 }
@@ -100,14 +104,14 @@ async function beginStep(flow: Flow): Promise<Response> {
  *  Admin grant it follows; otherwise properties picked through Admin are ones
  *  Data cannot read. A mismatched Data grant is dropped again. */
 async function rejectMismatchedAccount(
-  flow: Flow,
+  organizationId: string,
   connection: { integration: string; identityLabel: string | null },
 ): Promise<boolean> {
   if (connection.integration !== GOOGLE_ANALYTICS_DATA_INTEGRATION) {
     return false;
   }
   const connections = await env.INTEGRATIONS.listConnections({
-    organizationId: flow.organizationId,
+    organizationId,
   });
   const admin = connections.find(
     (entry) => entry.integration === GOOGLE_ANALYTICS_ADMIN_INTEGRATION,
@@ -121,7 +125,7 @@ async function rejectMismatchedAccount(
   }
   await env.INTEGRATIONS.removeConnection(
     connection.integration,
-    flow.organizationId,
+    organizationId,
   );
   return true;
 }
@@ -135,18 +139,20 @@ export async function handleGoogleConnectStart(
   if (!provider.success) {
     return new Response("Unknown Google provider", { status: 400 });
   }
-  return beginStep({
-    provider: provider.data,
-    organizationId: user.organizationId,
-    returnTo: safeReturnTo(url.searchParams.get("returnTo")),
-    step: 0,
-  });
+  return beginStep(
+    {
+      provider: provider.data,
+      returnTo: safeReturnTo(url.searchParams.get("returnTo")),
+      step: 0,
+    },
+    user.organizationId,
+  );
 }
 
 export async function handleGoogleConnectCallback(
   request: Request,
 ): Promise<Response> {
-  await resolveUserContextFromHeaders(request.headers);
+  const user = await resolveUserContextFromHeaders(request.headers);
   const url = new URL(request.url);
   const flow = readFlow(request);
   if (!flow) {
@@ -167,7 +173,15 @@ export async function handleGoogleConnectCallback(
       code,
     });
     forgetGoogleTools(connection.integration);
-    if (await rejectMismatchedAccount(flow, connection)) {
+    if (connection.name !== user.organizationId) {
+      // The state was minted for another workspace (the user switched
+      // mid-flow). The grant landed there; nothing here may act on it.
+      return redirect(
+        failureLocation(flow, "organization_mismatch"),
+        flowCookie(null),
+      );
+    }
+    if (await rejectMismatchedAccount(user.organizationId, connection)) {
       return redirect(
         failureLocation(flow, "account_mismatch"),
         flowCookie(null),
@@ -177,5 +191,5 @@ export async function handleGoogleConnectCallback(
     console.error("google connect: callback failed", error);
     return redirect(failureLocation(flow, "callback_failed"), flowCookie(null));
   }
-  return beginStep({ ...flow, step: flow.step + 1 });
+  return beginStep({ ...flow, step: flow.step + 1 }, user.organizationId);
 }
