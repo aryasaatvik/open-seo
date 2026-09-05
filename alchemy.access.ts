@@ -19,8 +19,16 @@ const WORKER_PREFIX = "open-seo";
 // self-hoster's stage name can't collide with the adoption path.
 export const HOSTED_PROD_STAGE = "hosted-prod";
 
+// Stages that own the unsuffixed resource names: hosted production and this
+// fork's single self-host deployment. Every other stage (previews) is
+// suffixed so several can coexist on one account.
+const UNSUFFIXED_STAGES = new Set([HOSTED_PROD_STAGE, "selfhost"]);
+
+export const stageSuffix = (stage: string) =>
+  UNSUFFIXED_STAGES.has(stage) ? "" : `-${stage}`;
+
 export const workerName = (stage: string) =>
-  stage === HOSTED_PROD_STAGE ? WORKER_PREFIX : `${WORKER_PREFIX}-${stage}`;
+  `${WORKER_PREFIX}${stageSuffix(stage)}`;
 
 // Matches every preview worker hostname; production's unsuffixed worker does
 // not match (Access allows one wildcard per dot-label).

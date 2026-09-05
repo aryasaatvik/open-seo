@@ -13,6 +13,7 @@ import {
   HOSTED_PROD_STAGE,
   readWorkersSubdomain,
   requireAllowedEmails,
+  stageSuffix,
   workerName,
 } from "./alchemy.access.ts";
 
@@ -87,14 +88,14 @@ const makeResources = (stage: string) => {
   const keep = Alchemy.RemovalPolicy.retain(prod);
   return {
     DB: Cloudflare.D1.Database("DB", {
-      name: prod ? PROD_NAMES.d1 : `open-seo-db-${stage}`,
+      name: prod ? PROD_NAMES.d1 : `open-seo-db${stageSuffix(stage)}`,
       // drizzle-generated SQL migrations; tracked in the same
       // wrangler-compatible table prod already uses.
       migrationsDir: "drizzle",
       migrationsTable: "d1_migrations",
     }).pipe(keep),
     R2: Cloudflare.R2.Bucket("R2", {
-      name: prod ? PROD_NAMES.r2 : `open-seo-r2-${stage}`,
+      name: prod ? PROD_NAMES.r2 : `open-seo-r2${stageSuffix(stage)}`,
       // Expire cached DataForSEO responses. Prod's lifecycle rules are
       // dashboard-managed; its props stay omitted so alchemy leaves them be.
       ...(prod
@@ -112,10 +113,12 @@ const makeResources = (stage: string) => {
           }),
     }).pipe(keep),
     KV: Cloudflare.KV.Namespace("KV", {
-      title: prod ? PROD_NAMES.kv : `open-seo-kv-${stage}`,
+      title: prod ? PROD_NAMES.kv : `open-seo-kv${stageSuffix(stage)}`,
     }).pipe(keep),
     OAUTH_KV: Cloudflare.KV.Namespace("OAUTH_KV", {
-      title: prod ? PROD_NAMES.oauthKv : `open-seo-oauth-kv-${stage}`,
+      title: prod
+        ? PROD_NAMES.oauthKv
+        : `open-seo-oauth-kv${stageSuffix(stage)}`,
     }).pipe(keep),
   };
 };
@@ -248,8 +251,8 @@ const resolveSelfHostAccess = (
       const application = yield* emailAccessGate({
         policyId: "SelfHostAllowUsers",
         applicationId: "SelfHostAccess",
-        policyName: `open-seo ${stage} self-host users`,
-        applicationName: `open-seo ${stage}`,
+        policyName: `open-seo${stageSuffix(stage)} users`,
+        applicationName: `open-seo${stageSuffix(stage)}`,
         // The hostname users actually hit: the custom domain when set,
         // otherwise the worker's workers.dev hostname.
         domain: customDomain || `${workerName(stage)}.${subdomain}`,
@@ -417,7 +420,7 @@ export default Alchemy.Stack(
         // alchemy resource id IS this name, so a drift orphans the live
         // registration and deletes it instead of repointing it.
         SITE_AUDIT_WORKFLOW: Cloudflare.Workflow(
-          prod ? "site-audit-workflow" : `site-audit-workflow-${stage}`,
+          `site-audit-workflow${stageSuffix(stage)}`,
           { className: "SiteAuditWorkflow" },
         ),
       },
@@ -509,15 +512,12 @@ export default Alchemy.Stack(
         ...Object.fromEntries(
           wrangler.workflows.map((workflow) => [
             workflow.binding,
-            Cloudflare.Workflow(
-              prod ? workflow.name : `${workflow.name}-${stage}`,
-              {
-                className: workflow.class_name,
-                scriptName: workflow.script_name
-                  ? auditWorker.workerName
-                  : undefined,
-              },
-            ),
+            Cloudflare.Workflow(`${workflow.name}${stageSuffix(stage)}`, {
+              className: workflow.class_name,
+              scriptName: workflow.script_name
+                ? auditWorker.workerName
+                : undefined,
+            }),
           ]),
         ),
       },
