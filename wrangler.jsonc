@@ -66,6 +66,12 @@
       "binding": "AUDIT_ENGINE",
       "service": "open-seo-audit",
     },
+    // The integration gateway (wrangler.integrations.jsonc): every upstream
+    // API call goes through its IntegrationGateway entrypoint.
+    {
+      "binding": "INTEGRATIONS",
+      "service": "open-seo-integrations",
+    },
   ],
   "migrations": [
     {

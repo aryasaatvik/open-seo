@@ -273,6 +273,8 @@ const dataEnv = {
   // AUTH_MODE, DATABASE_PROVIDER, BETTER_AUTH_URL, TEAM_DOMAIN, and
   // POLICY_AUD are stage-dependent and set in the stack body below.
   DATAFORSEO_API_KEY: Config.redacted("DATAFORSEO_API_KEY"),
+  // Master key for the integration gateway's credential store.
+  EXECUTOR_SECRET_KEY: Config.redacted("EXECUTOR_SECRET_KEY"),
   BYPASS_EMAIL_VERIFICATION: optionalVar("BYPASS_EMAIL_VERIFICATION"),
   BETTER_AUTH_SECRET: optionalSecret("BETTER_AUTH_SECRET"),
   GOOGLE_CLIENT_ID: optionalVar("GOOGLE_CLIENT_ID"),
@@ -372,7 +374,45 @@ export default Alchemy.Stack(
     // Created once and bound into BOTH workers — they share the same
     // D1/KV/R2 (and prod Hyperdrive). OAUTH_KV stays app-worker-only.
     const resources = makeResources(stage);
+    // Runtime settings every worker shares, read from wrangler.jsonc.
+    const workerRuntime = {
+      compatibility: {
+        date: wrangler.compatibility_date,
+        flags: wrangler.compatibility_flags,
+      },
+      observability: {
+        enabled: wrangler.observability?.enabled ?? true,
+        traces: { enabled: wrangler.observability?.traces?.enabled ?? false },
+      },
+    };
     const prodHyperdrive = prod ? makeHyperdrive() : undefined;
+
+    // Aux worker: the integration gateway (workers/integrations). Deployed
+    // first so both INTEGRATIONS service bindings have a target.
+    const publicOrigin = customDomain
+      ? `https://${customDomain}`
+      : authUrl || `https://${workerName(stage)}.${workersSubdomain}`;
+    const integrationsWorker = yield* Cloudflare.Worker(
+      "open-seo-integrations",
+      {
+        name: `${workerName(stage)}-integrations`,
+        main: "./dist/open_seo_integrations/index.js",
+        bundle: false,
+        url: false,
+        ...workerRuntime,
+        env: {
+          DB: resources.DB,
+          R2: resources.R2,
+          // The only worker holding upstream credentials; PUBLIC_ORIGIN is
+          // where Google redirects after consent.
+          DATAFORSEO_API_KEY: dataEnv.DATAFORSEO_API_KEY,
+          EXECUTOR_SECRET_KEY: dataEnv.EXECUTOR_SECRET_KEY,
+          GOOGLE_CLIENT_ID: dataEnv.GOOGLE_CLIENT_ID,
+          GOOGLE_CLIENT_SECRET: dataEnv.GOOGLE_CLIENT_SECRET,
+          PUBLIC_ORIGIN: publicOrigin,
+        },
+      },
+    ).pipe(Alchemy.RemovalPolicy.retain(prod));
 
     // Aux worker: the site-audit engine (src/audit-worker.ts) — the
     // SiteAuditWorkflow orchestrator and the per-audit AuditScratchpad DO.
@@ -385,17 +425,10 @@ export default Alchemy.Stack(
       main: "./dist/open_seo_audit/index.js",
       bundle: false,
       url: false,
-      compatibility: {
-        date: wrangler.compatibility_date,
-        flags: wrangler.compatibility_flags,
-      },
+      ...workerRuntime,
       // Audit workflow steps parse and persist batches of HTML. Configurable
       // CPU limits are a paid-plan feature; this fork deploys on Workers Paid.
       limits: { cpuMs: 300_000 },
-      observability: {
-        enabled: wrangler.observability?.enabled ?? true,
-        traces: { enabled: wrangler.observability?.traces?.enabled ?? false },
-      },
       env: {
         DB: resources.DB,
         KV: resources.KV,
@@ -408,6 +441,8 @@ export default Alchemy.Stack(
         AUTUMN_SECRET_KEY: dataEnv.AUTUMN_SECRET_KEY,
         POSTHOG_PUBLIC_KEY: dataEnv.POSTHOG_PUBLIC_KEY,
         POSTHOG_HOST: dataEnv.POSTHOG_HOST,
+        // Lighthouse reaches DataForSEO through the integration gateway.
+        INTEGRATIONS: integrationsWorker,
         AUTH_MODE: authMode,
         DATABASE_PROVIDER: databaseProvider || "d1",
         ...(prodHyperdrive ? { HYPERDRIVE: prodHyperdrive } : {}),
@@ -449,17 +484,10 @@ export default Alchemy.Stack(
       assets: {
         directory: "./dist/client",
       },
-      compatibility: {
-        date: wrangler.compatibility_date,
-        flags: wrangler.compatibility_flags,
-      },
+      ...workerRuntime,
       // RankCheckWorkflow parses SERP batches here. Configurable CPU limits
       // are a paid-plan feature; this fork deploys on Workers Paid.
       limits: { cpuMs: 300_000 },
-      observability: {
-        enabled: wrangler.observability?.enabled ?? true,
-        traces: { enabled: wrangler.observability?.traces?.enabled ?? false },
-      },
       placement:
         wrangler.placement?.mode === "smart" ? { mode: "smart" } : undefined,
       // Scheduled rank checks — src/server.ts `scheduled` handler.
@@ -480,6 +508,7 @@ export default Alchemy.Stack(
         // (cancel + GDPR erasure of scratchpad state; env key = binding
         // name).
         AUDIT_ENGINE: auditWorker,
+        INTEGRATIONS: integrationsWorker,
 
         // Per-user throttle for /mcp API-key auth (see
         // src/server/mcp/api-key-auth.ts). Only this stack declares the

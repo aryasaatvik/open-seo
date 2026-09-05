@@ -35,7 +35,7 @@ if (!existsSync(envFile)) {
     "",
     `  ${cmd("cp .env.selfhost.example .env.selfhost")}`,
     "",
-    `then set ${em("DATAFORSEO_API_KEY")} and ${em("ACCESS_ALLOWED_EMAILS")}.`,
+    `then set ${em("DATAFORSEO_API_KEY")}, ${em("ACCESS_ALLOWED_EMAILS")}, and ${em("EXECUTOR_SECRET_KEY")}.`,
   );
 }
 const env = {};
@@ -46,6 +46,13 @@ for (const line of readFileSync(envFile, "utf8").split("\n")) {
 if (!env.DATAFORSEO_API_KEY) {
   fail(
     `${em("DATAFORSEO_API_KEY")} is not set in ${envFile} — see docs/DATAFORSEO_API_KEY.md for how to get one.`,
+  );
+}
+if (!env.EXECUTOR_SECRET_KEY) {
+  fail(
+    `${em("EXECUTOR_SECRET_KEY")} is not set in ${envFile} — the integration gateway encrypts every stored credential with it.`,
+    "",
+    `  ${cmd("openssl rand -base64 32")}`,
   );
 }
 // When both are set, the deploy provisions no Access resources (hand-managed

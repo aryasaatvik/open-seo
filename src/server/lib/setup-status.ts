@@ -1,10 +1,16 @@
+import { env as workerEnv } from "cloudflare:workers";
 import { count } from "drizzle-orm";
 import { version } from "../../../package.json";
 import { db } from "@/db";
 import { projects } from "@/db/schema";
 import { getAuthMode } from "@/lib/auth-mode";
 import { runSelfhostChecks } from "@/lib/selfhost-preflight";
+import { invokeTool } from "@/server/lib/executor/client";
 import { getOptionalEnvValue } from "@/server/lib/runtime-env";
+import {
+  DATAFORSEO_INTEGRATION,
+  dataforseoToolAddress,
+} from "@/shared/integration-addresses";
 
 // "error" blocks core functionality; "warn" degrades a feature.
 type SetupCheck = {
@@ -37,6 +43,46 @@ const LEVEL_TO_STATUS = {
   warn: "warn",
   fail: "error",
 } as const;
+
+// The integration gateway: the embedded Executor must be reachable, hold the
+// DataForSEO connection, and be able to call DataForSEO with it. The account
+// endpoint is free and proves the stored credential renders and authenticates.
+async function checkIntegrations(): Promise<SetupCheck> {
+  try {
+    const connections = await workerEnv.INTEGRATIONS.listConnections();
+    if (
+      !connections.some(
+        (connection) => connection.integration === DATAFORSEO_INTEGRATION,
+      )
+    ) {
+      return {
+        status: "error",
+        detail:
+          "The gateway has no DataForSEO connection — check DATAFORSEO_API_KEY.",
+      };
+    }
+    const result = await invokeTool<{ status_code?: number }>(
+      dataforseoToolAddress("/v3/appendix/user_data"),
+      {},
+    );
+    if (!result.ok) {
+      return {
+        status: "error",
+        detail: `DataForSEO rejected the stored credential (${result.error.code}${result.error.status ? ` ${result.error.status}` : ""}).`,
+      };
+    }
+    return {
+      status: "ok",
+      detail: `${connections.length} connection${connections.length === 1 ? "" : "s"}`,
+    };
+  } catch (error) {
+    console.error("health check: integration gateway failed", error);
+    return {
+      status: "error",
+      detail: "Integration gateway unreachable — check server logs.",
+    };
+  }
+}
 
 async function checkDatabase(): Promise<SetupCheck> {
   try {
@@ -74,6 +120,9 @@ export async function getSelfHostSetupStatus(options?: {
   checks.database = options?.skipDatabaseCheck
     ? { status: "ok" }
     : await checkDatabase();
+  checks.integrations = options?.skipDatabaseCheck
+    ? { status: "ok" }
+    : await checkIntegrations();
 
   return { version, authMode: getAuthMode(env.AUTH_MODE), checks };
 }
