@@ -7,22 +7,19 @@ import { Cause, Effect, Exit, Option } from "effect";
 import {
   ConnectionName,
   IntegrationSlug,
-  OAuthClientSlug,
-  OAuthState,
   ToolAddress,
-  AuthTemplateSlug,
   isToolResult,
   type ToolResult,
 } from "@executor-js/sdk/core";
 import { bootstrap } from "./bootstrap";
-import { GOOGLE_AUTH_TEMPLATE, GOOGLE_INTEGRATION_SLUGS } from "./catalog";
+import { getExecutor, type GatewayEnv, type GatewayExecutor } from "./executor";
 import {
-  GOOGLE_OAUTH_CLIENT,
-  getExecutor,
-  type GatewayEnv,
-  type GatewayExecutor,
-} from "./executor";
-import { CONNECTION_NAME } from "../../../src/shared/integration-addresses";
+  googleOAuthComplete,
+  googleOAuthStart,
+  toGatewayConnection,
+  type GatewayConnection,
+} from "./google-oauth";
+import { organizationConnectionName } from "../../../src/shared/integration-addresses";
 
 /**
  * What every gateway call returns. Same shape as Executor's own ToolResult so
@@ -32,14 +29,7 @@ import { CONNECTION_NAME } from "../../../src/shared/integration-addresses";
  */
 export type GatewayResult = ToolResult<unknown>;
 
-export interface GatewayConnection {
-  integration: string;
-  name: string;
-  identityLabel: string | null;
-  expiresAt: number | null;
-}
-
-const GOOGLE_TEMPLATE = AuthTemplateSlug.make(GOOGLE_AUTH_TEMPLATE);
+export type { GatewayConnection } from "./google-oauth";
 
 function readField(value: unknown, key: string): unknown {
   return typeof value === "object" && value !== null
@@ -103,7 +93,7 @@ export default class IntegrationGateway extends WorkerEntrypoint<GatewayEnv> {
     return readyExecutor(this.env);
   }
 
-  /** Invoke one tool by full address (`tools.<integration>.org.default.<tool>`). */
+  /** Invoke one tool by full address (`tools.<integration>.org.<connection>.<tool>`). */
   async execute(address: string, args: unknown): Promise<GatewayResult> {
     const executor = await this.#executor();
     try {
@@ -125,39 +115,33 @@ export default class IntegrationGateway extends WorkerEntrypoint<GatewayEnv> {
     return tools.map((tool) => String(tool.name));
   }
 
-  async listConnections(): Promise<GatewayConnection[]> {
+  /** Every connection, or only those under one organization's name. */
+  async listConnections(filter?: {
+    organizationId: string;
+  }): Promise<GatewayConnection[]> {
     const executor = await this.#executor();
     const connections = await run(executor.connections.list());
-    return connections.map((connection) => ({
-      integration: String(connection.integration),
-      name: String(connection.name),
-      identityLabel: connection.identityLabel ?? null,
-      expiresAt: connection.expiresAt ?? null,
-    }));
+    const name = filter
+      ? organizationConnectionName(filter.organizationId)
+      : null;
+    return connections
+      .filter((connection) => name === null || connection.name === name)
+      .map(toGatewayConnection);
   }
 
-  /** Begin a Google OAuth grant for one Google integration. */
+  /** Begin a Google grant for one organization and one Google integration. */
   async googleOAuthStart(
     integration: string,
+    organizationId: string,
   ): Promise<{ authorizationUrl: string }> {
-    if (!GOOGLE_INTEGRATION_SLUGS.includes(integration)) {
-      throw new Error(`Not a Google integration: ${integration}`);
-    }
     const executor = await this.#executor();
-    const result = await run(
-      executor.oauth.start({
-        client: OAuthClientSlug.make(`first-party:${GOOGLE_OAUTH_CLIENT}`),
-        clientOwner: "org",
-        owner: "org",
-        name: ConnectionName.make(CONNECTION_NAME),
-        integration: IntegrationSlug.make(integration),
-        template: GOOGLE_TEMPLATE,
-      }),
+    return run(
+      googleOAuthStart(
+        executor,
+        integration,
+        organizationConnectionName(organizationId),
+      ),
     );
-    if (result.status !== "redirect") {
-      throw new Error("Google OAuth did not produce a redirect");
-    }
-    return { authorizationUrl: result.authorizationUrl };
   }
 
   /** Finish the grant Google redirected back with. */
@@ -166,27 +150,19 @@ export default class IntegrationGateway extends WorkerEntrypoint<GatewayEnv> {
     code: string;
   }): Promise<GatewayConnection> {
     const executor = await this.#executor();
-    const connection = await run(
-      executor.oauth.complete({
-        state: OAuthState.make(input.state),
-        code: input.code,
-      }),
-    );
-    return {
-      integration: String(connection.integration),
-      name: String(connection.name),
-      identityLabel: connection.identityLabel ?? null,
-      expiresAt: connection.expiresAt ?? null,
-    };
+    return run(googleOAuthComplete(executor, input));
   }
 
-  async removeConnection(integration: string): Promise<void> {
+  async removeConnection(
+    integration: string,
+    organizationId: string,
+  ): Promise<void> {
     const executor = await this.#executor();
     await run(
       executor.connections.remove({
         owner: "org",
         integration: IntegrationSlug.make(integration),
-        name: ConnectionName.make(CONNECTION_NAME),
+        name: ConnectionName.make(organizationConnectionName(organizationId)),
       }),
     );
   }

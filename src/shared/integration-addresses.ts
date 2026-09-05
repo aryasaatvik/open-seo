@@ -7,9 +7,25 @@ export const GOOGLE_SEARCH_CONSOLE_INTEGRATION = "google_search_console";
 export const GOOGLE_ANALYTICS_DATA_INTEGRATION = "google_analytics_data";
 export const GOOGLE_ANALYTICS_ADMIN_INTEGRATION = "google_analytics_admin";
 
-/** Every connection this deployment mints is org-owned and named `default`. */
+// Every connection is org-owned. Credentials the deployment itself holds
+// (DataForSEO) live in one connection named `default`; a Google grant is named
+// after the OpenSEO organization that consented, so an address built for one
+// organization can never reach another's credential.
 const CONNECTION_OWNER = "org";
 export const CONNECTION_NAME = "default";
+
+// Executor splits addresses on dots and this deployment never mints names
+// outside this set, so anything else is a bug upstream of the gateway.
+const CONNECTION_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+export function organizationConnectionName(organizationId: string): string {
+  if (!CONNECTION_NAME_PATTERN.test(organizationId)) {
+    throw new Error(
+      `Organization id cannot name a gateway connection: ${organizationId}`,
+    );
+  }
+  return organizationId;
+}
 
 /**
  * DataForSEO tool name for an API path. The trimmed spec stamps each operation
@@ -27,8 +43,12 @@ export function dataforseoToolName(path: string): string {
     .join(".");
 }
 
-function toolAddress(integration: string, tool: string): string {
-  return `tools.${integration}.${CONNECTION_OWNER}.${CONNECTION_NAME}.${tool}`;
+function toolAddress(
+  integration: string,
+  tool: string,
+  connectionName = CONNECTION_NAME,
+): string {
+  return `tools.${integration}.${CONNECTION_OWNER}.${connectionName}.${tool}`;
 }
 
 export function dataforseoToolAddress(path: string): string {

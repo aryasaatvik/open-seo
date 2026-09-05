@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   dataforseoToolAddress,
   dataforseoToolName,
+  organizationConnectionName,
 } from "./integration-addresses";
 
 const trimmedSpec = z.object({
@@ -42,6 +43,17 @@ describe("dataforseoToolName", () => {
       dataforseoToolAddress("/v3/serp/google/organic/task_get/advanced/{id}"),
     ).toBe(
       "tools.dataforseo_api.org.default.serp.google.organic.task_get.advanced",
+    );
+  });
+});
+
+describe("organizationConnectionName", () => {
+  it("passes an organization id through and rejects address separators", () => {
+    expect(organizationConnectionName("delegated-local-admin")).toBe(
+      "delegated-local-admin",
+    );
+    expect(() => organizationConnectionName("org.evil")).toThrow(
+      /cannot name a gateway connection/,
     );
   });
 });
