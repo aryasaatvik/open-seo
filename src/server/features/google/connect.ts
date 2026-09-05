@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { z } from "zod";
+import { normalizeAuthRedirect } from "@/lib/auth-redirect";
 import { resolveUserContextFromHeaders } from "@/middleware/ensure-user/resolve";
 import { forgetGoogleTools } from "@/server/lib/executor/google";
 import { GOOGLE_LINK_ERROR_PARAM } from "@/shared/google-link";
@@ -13,9 +14,10 @@ import {
 // /api/integrations/google/start, which asks the gateway for Google's consent
 // URL and redirects there; Google sends the user back to
 // /api/integrations/google/callback, which hands the code to the gateway.
-// The gateway mints one org-level connection per Google API. Analytics needs
-// two of them (Admin for property discovery, Data for reports), so the "ga4"
-// provider walks both consents in a row.
+// The gateway mints one connection per organization and Google API. Analytics
+// needs two of them (Admin for property discovery, Data for reports), so the
+// "ga4" provider walks both consents in a row and insists they come from the
+// same Google account.
 
 const PROVIDER_INTEGRATIONS = {
   gsc: [GOOGLE_SEARCH_CONSOLE_INTEGRATION],
@@ -30,6 +32,9 @@ const FLOW_COOKIE = "openseo_google_connect";
 const FLOW_TTL_SECONDS = 10 * 60;
 const flowSchema = z.object({
   provider: providerSchema,
+  /** The organization the grant is saved under, fixed at the start of the
+   *  flow so a mid-flow workspace switch cannot cross the wires. */
+  organizationId: z.string().min(1),
   returnTo: z.string().startsWith("/"),
   /** Index into PROVIDER_INTEGRATIONS[provider] of the consent in flight. */
   step: z.number().int().min(0),
@@ -72,11 +77,11 @@ function failureLocation(flow: Flow, code: string): string {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-/** Only same-origin paths; anything else falls back to the projects list. */
+/** Only same-origin paths (no `//` or backslash hosts); anything else falls
+ *  back to the projects list. */
 function safeReturnTo(value: string | null): string {
-  return value && value.startsWith("/") && !value.startsWith("//")
-    ? value
-    : "/projects";
+  const normalized = normalizeAuthRedirect(value);
+  return normalized === "/" ? "/projects" : normalized;
 }
 
 async function beginStep(flow: Flow): Promise<Response> {
@@ -84,15 +89,47 @@ async function beginStep(flow: Flow): Promise<Response> {
   if (!integration) {
     return redirect(flow.returnTo, flowCookie(null));
   }
-  const { authorizationUrl } =
-    await env.INTEGRATIONS.googleOAuthStart(integration);
+  const { authorizationUrl } = await env.INTEGRATIONS.googleOAuthStart(
+    integration,
+    flow.organizationId,
+  );
   return redirect(authorizationUrl, flowCookie(flow));
+}
+
+/** The Analytics Data grant must belong to the same Google account as the
+ *  Admin grant it follows; otherwise properties picked through Admin are ones
+ *  Data cannot read. A mismatched Data grant is dropped again. */
+async function rejectMismatchedAccount(
+  flow: Flow,
+  connection: { integration: string; identityLabel: string | null },
+): Promise<boolean> {
+  if (connection.integration !== GOOGLE_ANALYTICS_DATA_INTEGRATION) {
+    return false;
+  }
+  const connections = await env.INTEGRATIONS.listConnections({
+    organizationId: flow.organizationId,
+  });
+  const admin = connections.find(
+    (entry) => entry.integration === GOOGLE_ANALYTICS_ADMIN_INTEGRATION,
+  );
+  if (
+    !admin?.identityLabel ||
+    !connection.identityLabel ||
+    admin.identityLabel === connection.identityLabel
+  ) {
+    return false;
+  }
+  await env.INTEGRATIONS.removeConnection(
+    connection.integration,
+    flow.organizationId,
+  );
+  return true;
 }
 
 export async function handleGoogleConnectStart(
   request: Request,
 ): Promise<Response> {
-  await resolveUserContextFromHeaders(request.headers);
+  const user = await resolveUserContextFromHeaders(request.headers);
   const url = new URL(request.url);
   const provider = providerSchema.safeParse(url.searchParams.get("provider"));
   if (!provider.success) {
@@ -100,6 +137,7 @@ export async function handleGoogleConnectStart(
   }
   return beginStep({
     provider: provider.data,
+    organizationId: user.organizationId,
     returnTo: safeReturnTo(url.searchParams.get("returnTo")),
     step: 0,
   });
@@ -129,6 +167,12 @@ export async function handleGoogleConnectCallback(
       code,
     });
     forgetGoogleTools(connection.integration);
+    if (await rejectMismatchedAccount(flow, connection)) {
+      return redirect(
+        failureLocation(flow, "account_mismatch"),
+        flowCookie(null),
+      );
+    }
   } catch (error) {
     console.error("google connect: callback failed", error);
     return redirect(failureLocation(flow, "callback_failed"), flowCookie(null));

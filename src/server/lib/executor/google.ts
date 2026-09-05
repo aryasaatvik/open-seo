@@ -1,12 +1,17 @@
 import { env } from "cloudflare:workers";
 import { invokeTool, type ToolFailure, type ToolResult } from "./client";
-import { toolAddress } from "@/shared/integration-addresses";
+import {
+  organizationConnectionName,
+  toolAddress,
+} from "@/shared/integration-addresses";
 
 // Google APIs reach the gateway as Discovery-derived tools. Their names carry
 // the service prefix Google assigns (`webmasters.sites.list`,
 // `analyticsdata.properties.runReport`), which differs per Discovery version,
 // so the app pins each call by the method's suffix and resolves the full name
-// from the gateway's tool list once per isolate.
+// from the gateway's tool list once per isolate. Every call names the
+// organization whose grant it runs under: the gateway keeps one connection per
+// organization and integration, so no address can reach another tenant's.
 
 export class GoogleNotConnectedError extends Error {
   constructor(public readonly integration: string) {
@@ -20,11 +25,19 @@ const toolNamesByIntegration = new Map<string, Promise<readonly string[]>>();
 async function toolNames(integration: string): Promise<readonly string[]> {
   let pending = toolNamesByIntegration.get(integration);
   if (!pending) {
-    pending = env.INTEGRATIONS.listTools(integration).then((names) => {
-      // No tools means no connection yet; do not cache the miss.
-      if (names.length === 0) toolNamesByIntegration.delete(integration);
-      return names;
-    });
+    pending = env.INTEGRATIONS.listTools(integration).then(
+      (names) => {
+        // No tools means no connection yet; do not cache the miss.
+        if (names.length === 0) toolNamesByIntegration.delete(integration);
+        return names;
+      },
+      (error: unknown) => {
+        // A failed lookup (gateway still bootstrapping, database hiccup) must
+        // not pin the integration to that failure for the isolate's lifetime.
+        toolNamesByIntegration.delete(integration);
+        throw error;
+      },
+    );
     toolNamesByIntegration.set(integration, pending);
   }
   return pending;
@@ -36,6 +49,7 @@ export function forgetGoogleTools(integration: string): void {
 }
 
 async function resolveTool(
+  organizationId: string,
   integration: string,
   suffix: string,
 ): Promise<string> {
@@ -47,16 +61,25 @@ async function resolveTool(
   if (!match) {
     throw new Error(`${integration} exposes no tool ending in "${suffix}"`);
   }
-  return toolAddress(integration, match);
+  return toolAddress(
+    integration,
+    match,
+    organizationConnectionName(organizationId),
+  );
 }
 
-/** Call a Google tool by its method suffix, e.g. `sites.list`. */
+/** Call a Google tool by its method suffix, e.g. `sites.list`, under the
+ *  organization's grant. */
 export async function invokeGoogleTool<T>(
+  organizationId: string,
   integration: string,
   suffix: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult<T>> {
-  return invokeTool<T>(await resolveTool(integration, suffix), args);
+  return invokeTool<T>(
+    await resolveTool(organizationId, integration, suffix),
+    args,
+  );
 }
 
 /** The gateway could not produce a usable credential: the grant is gone,
@@ -85,9 +108,12 @@ type GoogleConnectionStatus = {
 };
 
 export async function googleConnectionStatus(
+  organizationId: string,
   integration: string,
 ): Promise<GoogleConnectionStatus> {
-  const connections = await env.INTEGRATIONS.listConnections();
+  const connections = await env.INTEGRATIONS.listConnections({
+    organizationId,
+  });
   const connection = connections.find(
     (entry) => entry.integration === integration,
   );

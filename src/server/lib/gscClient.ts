@@ -93,12 +93,13 @@ function toError(failure: ToolFailure): Error {
 /** Free Google Search Console client over the integration gateway. Unlike the
  *  DataForSEO client it does NOT meter credits — GSC is first-party data with
  *  no per-call cost. The gateway holds and refreshes the OAuth grant. */
-export function createGscClient() {
+export function createGscClient(opts: { organizationId: string }) {
   async function call<T>(
     suffix: string,
     args: Record<string, unknown>,
   ): Promise<T> {
     const result = await invokeGoogleTool<T>(
+      opts.organizationId,
       GOOGLE_SEARCH_CONSOLE_INTEGRATION,
       suffix,
       args,

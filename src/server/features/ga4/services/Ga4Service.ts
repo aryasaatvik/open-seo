@@ -20,15 +20,24 @@ async function getConnection(projectId: string): Promise<Ga4Connection | null> {
 
 /** GA4 needs both the Admin API (property discovery) and the Data API
  *  (reports). Both grants come from one consent flow; "connected" means both
- *  are present in the gateway. */
-async function getGoogleConnection() {
+ *  are present in the gateway for this organization and were made by the same
+ *  Google account, so a property picked through Admin is one Data can read. */
+async function getGoogleConnection(input: { organizationId: string }) {
   const [admin, data] = await Promise.all([
-    googleConnectionStatus(GOOGLE_ANALYTICS_ADMIN_INTEGRATION),
-    googleConnectionStatus(GOOGLE_ANALYTICS_DATA_INTEGRATION),
+    googleConnectionStatus(
+      input.organizationId,
+      GOOGLE_ANALYTICS_ADMIN_INTEGRATION,
+    ),
+    googleConnectionStatus(
+      input.organizationId,
+      GOOGLE_ANALYTICS_DATA_INTEGRATION,
+    ),
   ]);
+  const sameAccount =
+    admin.email === null || data.email === null || admin.email === data.email;
   return {
-    connected: admin.connected && data.connected,
-    email: data.email ?? admin.email,
+    connected: admin.connected && data.connected && sameAccount,
+    email: admin.email ?? data.email,
   };
 }
 
@@ -40,8 +49,8 @@ function requiresReconnect(error: unknown): boolean {
   );
 }
 
-async function listProperties() {
-  const google = await getGoogleConnection();
+async function listProperties(input: { organizationId: string }) {
+  const google = await getGoogleConnection(input);
   if (!google.connected) {
     return {
       requiresReconnect: true,
@@ -51,7 +60,7 @@ async function listProperties() {
     };
   }
   try {
-    const properties = await createGa4AdminClient().listProperties();
+    const properties = await createGa4AdminClient(input).listProperties();
     return {
       requiresReconnect: false,
       propertiesUnavailable: false,
@@ -80,7 +89,7 @@ async function setProperty(input: {
   organizationId: string;
   propertyId: string;
 }): Promise<Ga4Connection> {
-  const client = createGa4AdminClient();
+  const client = createGa4AdminClient(input);
   const properties = await client.listProperties();
   if (
     !properties.some((property) => property.propertyId === input.propertyId)

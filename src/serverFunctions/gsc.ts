@@ -17,11 +17,11 @@ export const getGscConnection = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const [connection, google] = await Promise.all([
       GscService.getConnection(context.projectId),
-      GscService.getGoogleConnection(),
+      GscService.getGoogleConnection(context),
     ]);
     return {
       connected: Boolean(connection),
-      // The org-level Google grant exists; a property may still need picking.
+      // The organization's Google grant exists; a property may still need picking.
       googleConnected: google.connected,
       siteUrl: connection?.siteUrl ?? null,
       connectedByEmail: google.email,
@@ -34,11 +34,12 @@ export const listGscSites = createServerFn({ method: "POST" })
   .validator(projectScopedSchema)
   .handler(async ({ context }) => {
     const [siteList, connection] = await Promise.all([
-      GscService.listSites(),
+      GscService.listSites(context),
       GscService.getConnection(context.projectId),
     ]);
     return {
       requiresReconnect: siteList.requiresReconnect,
+      sitesUnavailable: siteList.sitesUnavailable,
       email: siteList.email,
       sites: siteList.sites.map((site) => ({
         siteUrl: site.siteUrl,

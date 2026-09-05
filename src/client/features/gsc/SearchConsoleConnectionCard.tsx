@@ -130,7 +130,9 @@ export function SearchConsoleConnectionCard({
       ) : showPicker ? (
         <SitePicker
           loading={sitesQuery.isLoading}
-          error={sitesQuery.isError}
+          error={
+            sitesQuery.isError || Boolean(sitesQuery.data?.sitesUnavailable)
+          }
           requiresReconnect={Boolean(sitesQuery.data?.requiresReconnect)}
           email={sitesQuery.data?.email ?? null}
           sites={sites}

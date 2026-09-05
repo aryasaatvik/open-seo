@@ -279,6 +279,7 @@ async function runReport(input: Ga4ReportInput, opts: { now?: Date } = {}) {
 
   try {
     const client = createGa4DataClient({
+      organizationId: connection.organizationId,
       propertyId: connection.propertyId,
     });
     const previousDateRange = input.comparePreviousPeriod

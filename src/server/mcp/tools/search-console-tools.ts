@@ -68,7 +68,9 @@ async function missingGoogleConnectionResponse(
   context: ProjectAuthContext,
   projectId: string,
 ) {
-  const google = await GscService.getGoogleConnection();
+  const google = await GscService.getGoogleConnection({
+    organizationId: context.auth.organizationId,
+  });
   if (google.connected) return null;
 
   return mcpResponse({

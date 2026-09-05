@@ -21,7 +21,7 @@ export const getGa4Connection = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const [connection, google] = await Promise.all([
       Ga4Service.getConnection(context.projectId),
-      Ga4Service.getGoogleConnection(),
+      Ga4Service.getGoogleConnection(context),
     ]);
     return {
       connected: Boolean(connection),
@@ -125,7 +125,7 @@ export const listGa4Properties = createServerFn({ method: "POST" })
   .validator(projectScopedSchema)
   .handler(async ({ context }) => {
     const [propertyList, connection] = await Promise.all([
-      Ga4Service.listProperties(),
+      Ga4Service.listProperties(context),
       Ga4Service.getConnection(context.projectId),
     ]);
     return {

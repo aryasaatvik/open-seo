@@ -69,22 +69,28 @@ describe("GscService", () => {
   it("reports a dead grant as a reconnect instead of failing the list", async () => {
     mocks.listSites.mockRejectedValue(new GscTokenError("revoked"));
 
-    await expect(GscService.listSites()).resolves.toEqual({
+    await expect(GscService.listSites(baseInput)).resolves.toEqual({
       requiresReconnect: true,
+      sitesUnavailable: false,
       email: "owner@example.com",
       sites: [],
     });
+    expect(mocks.googleConnectionStatus).toHaveBeenCalledWith(
+      "org1",
+      "google_search_console",
+    );
   });
 
-  it("keeps non-auth API errors reportable while still asking to reconnect", async () => {
+  it("reports a non-auth API error as a retry, not a reconnect", async () => {
     const rateLimit = new GscApiError(429, "slow down");
     mocks.listSites.mockRejectedValue(rateLimit);
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
 
-    await expect(GscService.listSites()).resolves.toMatchObject({
-      requiresReconnect: true,
+    await expect(GscService.listSites(baseInput)).resolves.toMatchObject({
+      requiresReconnect: false,
+      sitesUnavailable: true,
     });
     expect(consoleError).toHaveBeenCalledWith(
       "Failed to list Search Console sites",
@@ -94,7 +100,10 @@ describe("GscService", () => {
   });
 
   it("labels performance results with the connected Google account", async () => {
-    mocks.getByProjectId.mockResolvedValue({ siteUrl: "https://x/" });
+    mocks.getByProjectId.mockResolvedValue({
+      siteUrl: "https://x/",
+      organizationId: "org1",
+    });
     mocks.querySearchAnalytics.mockResolvedValue([]);
 
     await expect(

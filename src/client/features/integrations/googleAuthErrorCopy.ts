@@ -27,6 +27,12 @@ export function googleAuthErrorCopy(
         description:
           "Google's permission screen was closed or declined. Try again whenever you're ready.",
       };
+    case "account_mismatch":
+      return {
+        title: "Two different Google accounts",
+        description:
+          "Google Analytics needs the Admin and Data permissions from the same Google account. Try again and pick the same account on both Google screens.",
+      };
     case "account_already_linked_to_different_user":
       return {
         title: "Google account already connected",

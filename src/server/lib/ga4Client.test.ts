@@ -71,7 +71,9 @@ describe("ga4Client admin API", () => {
         },
       });
 
-    await expect(createGa4AdminClient().listProperties()).resolves.toEqual([
+    await expect(
+      createGa4AdminClient({ organizationId: "org_1" }).listProperties(),
+    ).resolves.toEqual([
       {
         propertyId: "properties/11",
         displayName: "Site A",
@@ -96,7 +98,9 @@ describe("ga4Client admin API", () => {
     });
 
     await expect(
-      createGa4AdminClient().getProperty("properties/11"),
+      createGa4AdminClient({ organizationId: "org_1" }).getProperty(
+        "properties/11",
+      ),
     ).rejects.toBeInstanceOf(Ga4TokenError);
   });
 });
@@ -109,10 +113,13 @@ describe("ga4Client data API", () => {
     });
 
     await expect(
-      createGa4DataClient({ propertyId: "properties/123" }).runReport(report),
+      createGa4DataClient({
+        organizationId: "org_1",
+        propertyId: "properties/123",
+      }).runReport(report),
     ).resolves.toMatchObject({ rowCount: 0 });
     expect(mocks.invokeTool).toHaveBeenCalledWith(
-      "tools.google_analytics_data.org.default.analyticsdata.properties.runReport",
+      "tools.google_analytics_data.org.org_1.analyticsdata.properties.runReport",
       { property: "properties/123", body: report },
     );
   });
@@ -138,6 +145,7 @@ describe("ga4Client data API", () => {
     });
 
     const rejection = createGa4DataClient({
+      organizationId: "org_1",
       propertyId: "properties/123",
     }).runReport(report);
     await expect(rejection).rejects.toBeInstanceOf(Ga4DataApiError);
@@ -154,7 +162,10 @@ describe("ga4Client data API", () => {
     });
 
     await expect(
-      createGa4DataClient({ propertyId: "properties/123" }).runReport(report),
+      createGa4DataClient({
+        organizationId: "org_1",
+        propertyId: "properties/123",
+      }).runReport(report),
     ).rejects.toBeInstanceOf(Ga4MalformedResponseError);
   });
 });

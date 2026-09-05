@@ -143,12 +143,13 @@ function tokenError(failure: ToolFailure): Ga4TokenError {
 
 /** Read-only Admin API client used only for account/property discovery. The
  *  gateway holds and refreshes the OAuth grant. */
-export function createGa4AdminClient() {
+export function createGa4AdminClient(opts: { organizationId: string }) {
   async function call(
     suffix: string,
     args: Record<string, unknown>,
   ): Promise<unknown> {
     const result = await invokeGoogleTool<unknown>(
+      opts.organizationId,
       GOOGLE_ANALYTICS_ADMIN_INTEGRATION,
       suffix,
       args,
@@ -361,7 +362,10 @@ function upstreamReasonOf(failure: ToolFailure): string | null {
   );
 }
 
-export function createGa4DataClient(opts: { propertyId: string }) {
+export function createGa4DataClient(opts: {
+  organizationId: string;
+  propertyId: string;
+}) {
   const property = propertyIdSchema.parse(opts.propertyId);
 
   return {
@@ -369,6 +373,7 @@ export function createGa4DataClient(opts: { propertyId: string }) {
       request: Ga4RunReportRequest,
     ): Promise<Ga4RunReportResponse> {
       const result = await invokeGoogleTool<unknown>(
+        opts.organizationId,
         GOOGLE_ANALYTICS_DATA_INTEGRATION,
         "properties.runReport",
         { property, body: request },

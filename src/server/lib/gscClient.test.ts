@@ -23,13 +23,16 @@ describe("gscClient", () => {
   it("resolves the tool by method suffix and passes the site and body", async () => {
     mocks.invokeTool.mockResolvedValue({ ok: true, data: { rows: [] } });
 
-    await createGscClient().querySearchAnalytics("sc-domain:example.com", {
-      startDate: "2026-01-01",
-      endDate: "2026-01-31",
-    });
+    await createGscClient({ organizationId: "org_1" }).querySearchAnalytics(
+      "sc-domain:example.com",
+      {
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+      },
+    );
 
     expect(mocks.invokeTool).toHaveBeenCalledWith(
-      "tools.google_search_console.org.default.webmasters.searchanalytics.query",
+      "tools.google_search_console.org.org_1.webmasters.searchanalytics.query",
       {
         siteUrl: "sc-domain:example.com",
         body: { startDate: "2026-01-01", endDate: "2026-01-31" },
@@ -43,9 +46,9 @@ describe("gscClient", () => {
       error: { code: "CredentialResolutionError", message: "expired" },
     });
 
-    await expect(createGscClient().listSites()).rejects.toBeInstanceOf(
-      GscTokenError,
-    );
+    await expect(
+      createGscClient({ organizationId: "org_1" }).listSites(),
+    ).rejects.toBeInstanceOf(GscTokenError);
   });
 
   it("keeps the upstream status on API errors", async () => {
@@ -54,12 +57,14 @@ describe("gscClient", () => {
       error: { code: "upstream_http_error", message: "denied", status: 403 },
     });
 
-    await expect(createGscClient().listSites()).rejects.toMatchObject({
+    await expect(
+      createGscClient({ organizationId: "org_1" }).listSites(),
+    ).rejects.toMatchObject({
       name: "GscApiError",
       status: 403,
     });
-    await expect(createGscClient().listSites()).rejects.toBeInstanceOf(
-      GscApiError,
-    );
+    await expect(
+      createGscClient({ organizationId: "org_1" }).listSites(),
+    ).rejects.toBeInstanceOf(GscApiError);
   });
 });

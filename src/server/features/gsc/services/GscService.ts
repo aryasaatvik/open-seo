@@ -40,6 +40,9 @@ type GscPerformanceResult = {
 type GscSiteListResult = {
   /** The grant is gone or expired past refresh; the user has to reconnect. */
   requiresReconnect: boolean;
+  /** Search Console answered with a non-auth failure (rate limit, outage);
+   *  the grant is fine and a retry is the right move. */
+  sitesUnavailable: boolean;
   email: string | null;
   sites: GscSite[];
 };
@@ -48,9 +51,12 @@ async function getConnection(projectId: string): Promise<GscConnection | null> {
   return GscConnectionRepository.getByProjectId(projectId);
 }
 
-/** The org-level Google grant held by the integration gateway. */
-async function getGoogleConnection() {
-  return googleConnectionStatus(GOOGLE_SEARCH_CONSOLE_INTEGRATION);
+/** The organization's Google grant held by the integration gateway. */
+async function getGoogleConnection(input: { organizationId: string }) {
+  return googleConnectionStatus(
+    input.organizationId,
+    GOOGLE_SEARCH_CONSOLE_INTEGRATION,
+  );
 }
 
 /** Expected ways the stored grant fails to reach Search Console: the gateway
@@ -66,19 +72,37 @@ export function isExpectedGrantFailure(error: unknown): boolean {
   );
 }
 
-async function listSites(): Promise<GscSiteListResult> {
-  const google = await getGoogleConnection();
+async function listSites(input: {
+  organizationId: string;
+}): Promise<GscSiteListResult> {
+  const google = await getGoogleConnection(input);
   if (!google.connected) {
-    return { requiresReconnect: true, email: null, sites: [] };
+    return {
+      requiresReconnect: true,
+      sitesUnavailable: false,
+      email: null,
+      sites: [],
+    };
   }
   try {
-    const sites = await createGscClient().listSites();
-    return { requiresReconnect: false, email: google.email, sites };
+    const sites = await createGscClient(input).listSites();
+    return {
+      requiresReconnect: false,
+      sitesUnavailable: false,
+      email: google.email,
+      sites,
+    };
   } catch (error) {
-    if (!isExpectedGrantFailure(error)) {
+    const reconnect = isExpectedGrantFailure(error);
+    if (!reconnect) {
       console.error("Failed to list Search Console sites", error);
     }
-    return { requiresReconnect: true, email: google.email, sites: [] };
+    return {
+      requiresReconnect: reconnect,
+      sitesUnavailable: !reconnect,
+      email: google.email,
+      sites: [],
+    };
   }
 }
 
@@ -89,7 +113,7 @@ async function setSite(input: {
   organizationId: string;
   siteUrl: string;
 }): Promise<GscConnection> {
-  const sites = await createGscClient().listSites();
+  const sites = await createGscClient(input).listSites();
   const match = sites.find((s) => s.siteUrl === input.siteUrl);
   if (!match) {
     throw new AppError(
@@ -128,8 +152,11 @@ async function getPerformance(
   }
   const request = buildSearchAnalyticsRequest(input);
   const [rows, google] = await Promise.all([
-    createGscClient().querySearchAnalytics(connection.siteUrl, request),
-    getGoogleConnection(),
+    createGscClient(connection).querySearchAnalytics(
+      connection.siteUrl,
+      request,
+    ),
+    getGoogleConnection(connection),
   ]);
   return {
     siteUrl: connection.siteUrl,
@@ -166,7 +193,7 @@ async function inspectUrls(input: {
   if (!connection) {
     throw new GscNotConnectedError(input.projectId);
   }
-  const client = createGscClient();
+  const client = createGscClient(connection);
   const results: GscUrlInspection[] = [];
   for (const url of input.urls) {
     try {
@@ -190,7 +217,7 @@ async function inspectUrls(input: {
       });
     }
   }
-  const google = await getGoogleConnection();
+  const google = await getGoogleConnection(connection);
   return {
     siteUrl: connection.siteUrl,
     connectedBy: google.email,

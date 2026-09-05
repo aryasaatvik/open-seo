@@ -14,6 +14,17 @@ import {
   signGdprErasureRequest,
   type GdprStorageErasurePayload,
 } from "@/shared/gdpr-erasure";
+import {
+  GOOGLE_ANALYTICS_ADMIN_INTEGRATION,
+  GOOGLE_ANALYTICS_DATA_INTEGRATION,
+  GOOGLE_SEARCH_CONSOLE_INTEGRATION,
+} from "@/shared/integration-addresses";
+
+const GOOGLE_INTEGRATIONS = [
+  GOOGLE_SEARCH_CONSOLE_INTEGRATION,
+  GOOGLE_ANALYTICS_ADMIN_INTEGRATION,
+  GOOGLE_ANALYTICS_DATA_INTEGRATION,
+];
 
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
@@ -128,6 +139,25 @@ async function deleteOrganizationPromptCaches(
   return keys.length;
 }
 
+// The Google grants of an erased organization live in the integration
+// gateway, keyed by organization. Removing them revokes the app's access; the
+// tokens themselves go with the gateway's connection rows.
+async function deleteGoogleConnections(env: Env, organizationIds: string[]) {
+  let removed = 0;
+  for (const organizationId of organizationIds) {
+    const held = await env.INTEGRATIONS.listConnections({ organizationId });
+    for (const connection of held) {
+      if (!GOOGLE_INTEGRATIONS.includes(connection.integration)) continue;
+      await env.INTEGRATIONS.removeConnection(
+        connection.integration,
+        organizationId,
+      );
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
 async function eraseStorage(env: Env, payload: GdprStorageErasurePayload) {
   // Stop live workflows first so a running crawl can't rewrite a scratchpad
   // after it is wiped.
@@ -184,6 +214,10 @@ async function eraseStorage(env: Env, payload: GdprStorageErasurePayload) {
   );
 
   const oauth = await deleteOauthGrants(env.OAUTH_KV, payload.userId);
+  const googleConnections = await deleteGoogleConnections(
+    env,
+    payload.organizationIds,
+  );
   return {
     workflows: {
       auditTerminated: auditWorkflowsTerminated,
@@ -201,6 +235,7 @@ async function eraseStorage(env: Env, payload: GdprStorageErasurePayload) {
     },
     r2Objects: payload.r2Keys.length,
     promptCacheObjects,
+    googleConnections,
   };
 }
 

@@ -30,6 +30,8 @@ vi.mock("@/server/features/ga4/repositories/Ga4ConnectionRepository", () => ({
   },
 }));
 
+const org = { organizationId: "org1" };
+
 describe("Ga4Service", () => {
   beforeEach(() => {
     mocks.googleConnectionStatus.mockResolvedValue({
@@ -85,7 +87,7 @@ describe("Ga4Service", () => {
 
   it("distinguishes an expired grant from inaccessible property discovery", async () => {
     mocks.listProperties.mockRejectedValueOnce(new Ga4TokenError("revoked"));
-    await expect(Ga4Service.listProperties()).resolves.toMatchObject({
+    await expect(Ga4Service.listProperties(org)).resolves.toMatchObject({
       requiresReconnect: true,
       propertiesUnavailable: false,
     });
@@ -96,7 +98,7 @@ describe("Ga4Service", () => {
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
-    await expect(Ga4Service.listProperties()).resolves.toMatchObject({
+    await expect(Ga4Service.listProperties(org)).resolves.toMatchObject({
       requiresReconnect: false,
       propertiesUnavailable: true,
     });
@@ -112,9 +114,19 @@ describe("Ga4Service", () => {
       .mockResolvedValueOnce({ connected: true, email: "owner@example.com" })
       .mockResolvedValueOnce({ connected: false, email: null });
 
-    await expect(Ga4Service.getGoogleConnection()).resolves.toEqual({
+    await expect(Ga4Service.getGoogleConnection(org)).resolves.toEqual({
       connected: false,
       email: "owner@example.com",
+    });
+  });
+
+  it("does not count Admin and Data grants from different Google accounts", async () => {
+    mocks.googleConnectionStatus
+      .mockResolvedValueOnce({ connected: true, email: "admin@example.com" })
+      .mockResolvedValueOnce({ connected: true, email: "other@example.com" });
+
+    await expect(Ga4Service.getGoogleConnection(org)).resolves.toMatchObject({
+      connected: false,
     });
   });
 });
