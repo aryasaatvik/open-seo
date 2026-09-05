@@ -22,7 +22,7 @@
     "alchemy": "NODE_OPTIONS=\"$NODE_OPTIONS --experimental-strip-types\" alchemy",
     "destroy:preview": "pnpm alchemy destroy --env-file .env.preview",
     "sourcemaps:upload": "POSTHOG_SOURCEMAPS=true NODE_OPTIONS=--max-old-space-size=8192 npm run build && pnpm dlx @posthog/cli sourcemap inject --directory ./dist-sourcemaps && pnpm dlx @posthog/cli sourcemap upload --directory ./dist-sourcemaps",
-    "cf-typegen": "wrangler types --config wrangler.jsonc --config wrangler.audit.jsonc",
+    "cf-typegen": "wrangler types --config wrangler.jsonc --config wrangler.audit.jsonc --config wrangler.integrations.jsonc",
     "types:check": "tsc --noEmit",
     "format:check": "prettier --check .",
     "format:write": "prettier . --write",
@@ -117,7 +117,6 @@
     "sonner": "^2.0.7",
     "tailwindcss": "^4.1.16",
     "tldts": "^7.0.25",
-    "yaml": "^2.9.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
@@ -150,6 +149,7 @@
     "vite": "^7.3.6",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.2.6",
-    "wrangler": "^4.105.0"
+    "wrangler": "^4.105.0",
+    "yaml": "^2.9.0"
   }
 }
