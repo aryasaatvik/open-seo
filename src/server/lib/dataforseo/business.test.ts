@@ -1,8 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/server/lib/runtime-env", () => ({
-  getRequiredEnvValue: vi.fn(async () => "test-api-key"),
-}));
+vi.mock("@/server/lib/executor/client", () => ({ invokeTool: vi.fn() }));
 
 import {
   fetchBusinessDataTaskResult,
@@ -11,37 +9,23 @@ import {
   fetchMyBusinessInfo,
   postGoogleReviewsTask,
 } from "@/server/lib/dataforseo/business";
+import {
+  address,
+  envelope,
+  gateway,
+  httpFailure,
+  requestOf,
+} from "@/server/lib/dataforseo/gateway-test-support";
 
-function stubDataforseo(payload: unknown) {
-  const fetchMock = vi
-    .fn<typeof fetch>()
-    .mockResolvedValue(Response.json(payload));
-  vi.stubGlobal("fetch", fetchMock);
-  return fetchMock;
-}
-
-function requestOf(fetchMock: ReturnType<typeof stubDataforseo>) {
-  const [url, init] = fetchMock.mock.calls[0];
-  const rawUrl = typeof url === "string" || url instanceof URL ? url : url.url;
-  const body = init?.body;
-  return {
-    url: rawUrl.toString(),
-    body: typeof body === "string" ? (JSON.parse(body) as unknown) : null,
-  };
-}
-
-const okTask = (path: string[], result: unknown[]) => ({
-  status_code: 20000,
-  tasks: [{ status_code: 20000, path, cost: 0.002, result }],
-});
-
-describe("Google business_data fetchers", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
+const okTask = (path: string[], result: unknown[]) =>
+  envelope({
+    status_code: 20000,
+    tasks: [{ status_code: 20000, path, cost: 0.002, result }],
   });
 
+describe("Google business_data fetchers", () => {
   it("sends a coordinate for my_business_info and returns the single item", async () => {
-    const fetchMock = stubDataforseo(
+    gateway.mockResolvedValue(
       okTask(
         ["v3", "business_data", "google", "my_business_info", "live"],
         [{ items: [{ title: "Acme Cafe", is_claimed: true }] }],
@@ -55,12 +39,12 @@ describe("Google business_data fetchers", () => {
       languageCode: "en",
     });
 
-    const { url, body } = requestOf(fetchMock);
-    expect(url).toBe(
-      "https://api.dataforseo.com/v3/business_data/google/my_business_info/live",
+    const request = requestOf();
+    expect(request.address).toBe(
+      address("/v3/business_data/google/my_business_info/live"),
     );
     // The coordinate wins: DataForSEO rejects a request carrying both.
-    expect(body).toEqual([
+    expect(request.args.body).toEqual([
       {
         keyword: "cid:123",
         location_coordinate: "33.1234568,-84.9876543,5000",
@@ -72,17 +56,19 @@ describe("Google business_data fetchers", () => {
   });
 
   it("falls back to location_code and treats no-results as an empty success", async () => {
-    const fetchMock = stubDataforseo({
-      status_code: 20000,
-      tasks: [
-        {
-          status_code: 40501,
-          status_message: "No Search Results.",
-          path: ["v3", "business_data", "google", "my_business_info", "live"],
-          cost: 0.002,
-        },
-      ],
-    });
+    gateway.mockResolvedValue(
+      envelope({
+        status_code: 20000,
+        tasks: [
+          {
+            status_code: 40501,
+            status_message: "No Search Results.",
+            path: ["v3", "business_data", "google", "my_business_info", "live"],
+            cost: 0.002,
+          },
+        ],
+      }),
+    );
 
     const result = await fetchMyBusinessInfo({
       keyword: "Nowhere Cafe",
@@ -90,7 +76,7 @@ describe("Google business_data fetchers", () => {
       languageCode: "en",
     });
 
-    expect(requestOf(fetchMock).body).toEqual([
+    expect(requestOf().args.body).toEqual([
       {
         keyword: "Nowhere Cafe",
         location_code: 2840,
@@ -103,17 +89,19 @@ describe("Google business_data fetchers", () => {
   });
 
   it("posts regular reviews with sort_by and bills from the post entry", async () => {
-    const fetchMock = stubDataforseo({
-      status_code: 20000,
-      tasks: [
-        {
-          id: "task-1",
-          status_code: 20100,
-          cost: 0.00375,
-          path: ["v3", "business_data", "google", "reviews", "task_post"],
-        },
-      ],
-    });
+    gateway.mockResolvedValue(
+      envelope({
+        status_code: 20000,
+        tasks: [
+          {
+            id: "task-1",
+            status_code: 20100,
+            cost: 0.00375,
+            path: ["v3", "business_data", "google", "reviews", "task_post"],
+          },
+        ],
+      }),
+    );
 
     const result = await postGoogleReviewsTask({
       cid: "123",
@@ -124,11 +112,11 @@ describe("Google business_data fetchers", () => {
       includeOtherSources: false,
     });
 
-    const { url, body } = requestOf(fetchMock);
-    expect(url).toBe(
-      "https://api.dataforseo.com/v3/business_data/google/reviews/task_post",
+    const request = requestOf();
+    expect(request.address).toBe(
+      address("/v3/business_data/google/reviews/task_post"),
     );
-    expect(body).toEqual([
+    expect(request.args.body).toEqual([
       {
         cid: "123",
         location_code: 2840,
@@ -148,23 +136,25 @@ describe("Google business_data fetchers", () => {
   });
 
   it("posts to the extended_reviews endpoint when other sources are requested", async () => {
-    const fetchMock = stubDataforseo({
-      status_code: 20000,
-      tasks: [
-        {
-          id: "task-2",
-          status_code: 20100,
-          cost: 0.01,
-          path: [
-            "v3",
-            "business_data",
-            "google",
-            "extended_reviews",
-            "task_post",
-          ],
-        },
-      ],
-    });
+    gateway.mockResolvedValue(
+      envelope({
+        status_code: 20000,
+        tasks: [
+          {
+            id: "task-2",
+            status_code: 20100,
+            cost: 0.01,
+            path: [
+              "v3",
+              "business_data",
+              "google",
+              "extended_reviews",
+              "task_post",
+            ],
+          },
+        ],
+      }),
+    );
 
     const result = await postGoogleReviewsTask({
       cid: "123",
@@ -176,11 +166,11 @@ describe("Google business_data fetchers", () => {
       includeOtherSources: true,
     });
 
-    const { url, body } = requestOf(fetchMock);
-    expect(url).toBe(
-      "https://api.dataforseo.com/v3/business_data/google/extended_reviews/task_post",
+    const request = requestOf();
+    expect(request.address).toBe(
+      address("/v3/business_data/google/extended_reviews/task_post"),
     );
-    expect(body).toEqual([
+    expect(request.args.body).toEqual([
       {
         cid: "123",
         location_code: 2840,
@@ -200,10 +190,7 @@ describe("Google business_data fetchers", () => {
   });
 
   it("never replays a task_post on a 5xx (a retry could double-charge)", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response("upstream error", { status: 500 }));
-    vi.stubGlobal("fetch", fetchMock);
+    gateway.mockResolvedValue(httpFailure(500, "upstream error"));
 
     await expect(
       postGoogleReviewsTask({
@@ -215,14 +202,16 @@ describe("Google business_data fetchers", () => {
         includeOtherSources: false,
       }),
     ).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(gateway).toHaveBeenCalledTimes(1);
   });
 
   it("reports a queued task as pending instead of failing", async () => {
-    stubDataforseo({
-      status_code: 20000,
-      tasks: [{ status_code: 40602, status_message: "Task In Queue." }],
-    });
+    gateway.mockResolvedValue(
+      envelope({
+        status_code: 20000,
+        tasks: [{ status_code: 40602, status_message: "Task In Queue." }],
+      }),
+    );
 
     await expect(
       fetchBusinessDataTaskResult({ endpoint: "reviews", taskId: "task-1" }),
@@ -230,7 +219,7 @@ describe("Google business_data fetchers", () => {
   });
 
   it("returns the first result once the task completed", async () => {
-    const fetchMock = stubDataforseo(
+    gateway.mockResolvedValue(
       okTask(
         ["v3", "business_data", "google", "extended_reviews", "task_get"],
         [{ reviews_count: 12, items: [{ review_text: "Great" }] }],
@@ -242,9 +231,12 @@ describe("Google business_data fetchers", () => {
       taskId: "task-9",
     });
 
-    expect(requestOf(fetchMock).url).toBe(
-      "https://api.dataforseo.com/v3/business_data/google/extended_reviews/task_get/task-9",
-    );
+    expect(requestOf()).toEqual({
+      address: address(
+        "/v3/business_data/google/extended_reviews/task_get/{id}",
+      ),
+      args: { id: "task-9" },
+    });
     expect(outcome).toEqual({
       status: "completed",
       result: { reviews_count: 12, items: [{ review_text: "Great" }] },
@@ -252,7 +244,7 @@ describe("Google business_data fetchers", () => {
   });
 
   it("maps the free categories list onto category/businessCount rows", async () => {
-    stubDataforseo(
+    gateway.mockResolvedValue(
       okTask(
         ["v3", "business_data", "business_listings", "categories"],
         [
@@ -271,7 +263,7 @@ describe("Google business_data fetchers", () => {
   });
 
   it("forwards business-listing filters, claim status, and offset", async () => {
-    const fetchMock = stubDataforseo(
+    gateway.mockResolvedValue(
       okTask(
         ["v3", "business_data", "business_listings", "search", "live"],
         [{ items: [] }],
@@ -287,7 +279,7 @@ describe("Google business_data fetchers", () => {
       offset: 10,
     });
 
-    expect(requestOf(fetchMock).body).toEqual([
+    expect(requestOf().args.body).toEqual([
       {
         location_coordinate: "33.1,-84.9,5",
         is_claimed: false,

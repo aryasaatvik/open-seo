@@ -62,9 +62,6 @@ declare namespace Cloudflare {
     TURNSTILE_SECRET_KEY?: string;
     TURNSTILE_SITE_KEY?: string;
 
-    // DataForSEO API Basic auth value (base64 of login:password)
-    DATAFORSEO_API_KEY: string;
-
     // OpenRouter API key for the in-app chat agents (onboarding + SAM).
     OPENROUTER_API_KEY?: string;
     // Optional OpenRouter model slug override (defaults in openrouter.ts).

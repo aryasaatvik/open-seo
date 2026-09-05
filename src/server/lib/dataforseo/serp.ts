@@ -307,7 +307,8 @@ export async function fetchRankCheckTaskResult(input: {
   targetDomain: string;
 }): Promise<RankCheckTaskOutcome> {
   const response = await dataforseoGet(
-    `/v3/serp/google/organic/task_get/advanced/${encodeURIComponent(input.taskId)}`,
+    "/v3/serp/google/organic/task_get/advanced/{id}",
+    { params: { id: input.taskId } },
   );
   const task = response?.tasks?.[0];
   if (!response || response.status_code !== 20000 || !task) {
