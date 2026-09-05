@@ -21,16 +21,43 @@ const REQUEST_TIMEOUT_MS = 60_000;
 // (mobile and desktop for five URLs), and the gateway RPC hands each payload
 // over fully materialized, so the cap has to cover the call itself, not only
 // the parse: at most MAX_IN_FLIGHT payloads exist per isolate, and one parses
-// at a time. Three keeps the worst-case wait for a ten-call chunk (three
-// queued 60s rounds plus its own run) inside the workflow's 5-minute step.
+// at a time.
 const MAX_IN_FLIGHT = 3;
+// The cap is per isolate, not per audit: two audits sharing an isolate queue
+// twenty calls behind three slots. A call that waits longer than this fails
+// instead of starting so late that its 60s run lands past the workflow's
+// 5-minute step; the audit layer records that as a failed check for the page
+// rather than losing the whole step to a timeout.
+const SLOT_WAIT_MS = 3 * 60_000;
 let inFlight = 0;
 const waiters: Array<() => void> = [];
-async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
-  if (inFlight >= MAX_IN_FLIGHT) {
-    await new Promise<void>((resolve) => waiters.push(resolve));
+
+async function acquireSlot(): Promise<void> {
+  if (inFlight < MAX_IN_FLIGHT) {
+    inFlight += 1;
+    return;
+  }
+  const acquired = await new Promise<boolean>((resolve) => {
+    const wake = () => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      waiters.splice(waiters.indexOf(wake), 1);
+      resolve(false);
+    }, SLOT_WAIT_MS);
+    waiters.push(wake);
+  });
+  if (!acquired) {
+    throw new Error(
+      "Lighthouse call waited over 3 minutes for a slot in this worker and was skipped; rerun the audit later.",
+    );
   }
   inFlight += 1;
+}
+
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  await acquireSlot();
   try {
     return await fn();
   } finally {
