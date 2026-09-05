@@ -432,6 +432,10 @@ export default Alchemy.Stack(
         : customDomain
           ? [customDomain]
           : undefined,
+      // With a custom domain the Access application covers only that
+      // hostname, so drop the workers.dev route instead of leaving an
+      // unauthenticated (fail-closed, but public) copy of the app around.
+      url: !customDomain,
       // Prebuilt worker from `vite build` (@cloudflare/vite-plugin). The entry
       // exports the DO + WorkflowEntrypoint classes (re-exported by
       // src/server.ts), which `bundle: false` requires. Sibling chunks under
