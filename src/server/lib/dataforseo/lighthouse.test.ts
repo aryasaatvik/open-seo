@@ -62,3 +62,26 @@ describe("fetchLighthouseResult", () => {
     expect(gateway).toHaveBeenCalledOnce();
   });
 });
+
+describe("fetchLighthouseResult in-flight cap", () => {
+  it("holds a fourth call until one of the three in flight settles", async () => {
+    const release: Array<(value: ReturnType<typeof httpFailure>) => void> = [];
+    gateway.mockImplementation(
+      () => new Promise((resolve) => release.push(resolve)),
+    );
+    const input = { url: "https://example.com/", strategy: "mobile" as const };
+
+    const calls = Array.from({ length: 4 }, () =>
+      fetchLighthouseResult(input).catch(() => "settled"),
+    );
+    await Promise.resolve();
+    expect(gateway).toHaveBeenCalledTimes(3);
+
+    release[0]?.(httpFailure(503));
+    await calls[0];
+    expect(gateway).toHaveBeenCalledTimes(4);
+
+    for (const resolve of release.slice(1)) resolve(httpFailure(503));
+    await expect(Promise.all(calls)).resolves.toHaveLength(4);
+  });
+});
