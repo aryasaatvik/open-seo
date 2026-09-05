@@ -304,6 +304,10 @@ const dataEnv = {
   OPENSEO_TELEMETRY_DISABLED: optionalVar("OPENSEO_TELEMETRY_DISABLED"),
 };
 
+// The app worker never talks to DataForSEO directly; only the integration
+// gateway holds the key.
+const { DATAFORSEO_API_KEY: _gatewayOnly, ...appEnv } = dataEnv;
+
 export default Alchemy.Stack(
   "open-seo",
   {
@@ -435,9 +439,9 @@ export default Alchemy.Stack(
         R2: resources.R2,
         // Deliberately NOT ...dataEnv: this worker crawls and parses
         // attacker-influenced HTML, so it gets only the secrets its code
-        // path reads — DataForSEO (Lighthouse), Autumn (metering), PostHog
-        // (capture). No auth/OAuth/Loops/Turnstile secrets.
-        DATAFORSEO_API_KEY: dataEnv.DATAFORSEO_API_KEY,
+        // path reads — Autumn (metering), PostHog (capture). DataForSEO
+        // (Lighthouse) goes through the gateway. No auth/OAuth/Loops/
+        // Turnstile secrets.
         AUTUMN_SECRET_KEY: dataEnv.AUTUMN_SECRET_KEY,
         POSTHOG_PUBLIC_KEY: dataEnv.POSTHOG_PUBLIC_KEY,
         POSTHOG_HOST: dataEnv.POSTHOG_HOST,
@@ -494,7 +498,7 @@ export default Alchemy.Stack(
       crons: wrangler.triggers.crons,
       env: {
         ...resources,
-        ...dataEnv,
+        ...appEnv,
         AUTH_MODE: authMode,
         DATABASE_PROVIDER: databaseProvider || "d1",
         BETTER_AUTH_URL: authUrl,
