@@ -1,8 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/server/lib/runtime-env", () => ({
-  getRequiredEnvValue: vi.fn(async () => "test-api-key"),
-}));
+vi.mock("@/server/lib/executor/client", () => ({ invokeTool: vi.fn() }));
 
 import { fetchQuestionsAnswers } from "@/server/lib/dataforseo/business";
 import {
@@ -13,23 +11,17 @@ import {
   fetchLlmTopPages,
 } from "@/server/lib/dataforseo/ai";
 import { buildLlmTarget } from "@/server/lib/dataforseo/shared";
-
-function parseDataforseoRequestBody(init: RequestInit | undefined): unknown {
-  const body = init?.body;
-  if (typeof body !== "string") {
-    throw new Error("Expected DataForSEO request body to be a string");
-  }
-  return JSON.parse(body) as unknown;
-}
+import {
+  address,
+  envelope,
+  gateway,
+  requestOf,
+} from "@/server/lib/dataforseo/gateway-test-support";
 
 describe("DataForSEO SDK-backed endpoints", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("uses the live endpoint for Google Business Q&A and returns items + billing", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
+    gateway.mockResolvedValue(
+      envelope({
         status_code: 20000,
         tasks: [
           {
@@ -57,7 +49,6 @@ describe("DataForSEO SDK-backed endpoints", () => {
         ],
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     const result = await fetchQuestionsAnswers({
       keyword: "Acme Storage",
@@ -66,15 +57,9 @@ describe("DataForSEO SDK-backed endpoints", () => {
       depth: 20,
     });
 
-    expect(
-      fetchMock.mock.calls.map(([url]) =>
-        typeof url === "string" || url instanceof URL
-          ? url.toString()
-          : url.url,
-      ),
-    ).toEqual([
-      "https://api.dataforseo.com/v3/business_data/google/questions_and_answers/live",
-    ]);
+    expect(requestOf().address).toBe(
+      address("/v3/business_data/google/questions_and_answers/live"),
+    );
     expect(result.data).toEqual([
       { question_text: "Do you offer indoor storage?", answer_text: "Yes." },
     ]);
@@ -85,22 +70,19 @@ describe("DataForSEO SDK-backed endpoints", () => {
   });
 
   it("serializes LLM mentions domain targets for search, top pages, and aggregated endpoints", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation((url) => {
-      const path =
-        typeof url === "string" || url instanceof URL
-          ? url.toString()
-          : url.url;
-      const result = path.includes("/aggregated_metrics/")
+    gateway.mockImplementation((toolAddress) => {
+      const tool = toolAddress.split(".org.default.")[1] ?? "";
+      const result = tool.endsWith(".aggregated_metrics.live")
         ? { total: { platform: [] } }
         : { items: [] };
 
       return Promise.resolve(
-        Response.json({
+        envelope({
           status_code: 20000,
           tasks: [
             {
               status_code: 20000,
-              path: new URL(path).pathname.split("/").filter(Boolean),
+              path: ["v3", ...tool.split(".")],
               cost: 0.0001,
               result_count: 1,
               result: [result],
@@ -109,7 +91,6 @@ describe("DataForSEO SDK-backed endpoints", () => {
         }),
       );
     });
-    vi.stubGlobal("fetch", fetchMock);
 
     const target = buildLlmTarget({
       type: "domain",
@@ -143,8 +124,8 @@ describe("DataForSEO SDK-backed endpoints", () => {
         include_subdomains: true,
       },
     ];
-    const payloads = fetchMock.mock.calls.map(([, init]) =>
-      parseDataforseoRequestBody(init),
+    const payloads = gateway.mock.calls.map(
+      (_, index) => requestOf(index).args.body,
     );
 
     expect(payloads).toEqual([
@@ -181,8 +162,8 @@ describe("DataForSEO SDK-backed endpoints", () => {
   });
 
   it("serializes cross-aggregated target groups", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
+    gateway.mockResolvedValue(
+      envelope({
         status_code: 20000,
         tasks: [
           {
@@ -201,7 +182,6 @@ describe("DataForSEO SDK-backed endpoints", () => {
         ],
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     await fetchLlmCrossAggregatedMetrics({
       groups: [
@@ -219,7 +199,7 @@ describe("DataForSEO SDK-backed endpoints", () => {
       languageCode: "en",
     });
 
-    expect(parseDataforseoRequestBody(fetchMock.mock.calls[0]?.[1])).toEqual([
+    expect(requestOf().args.body).toEqual([
       {
         targets: [
           {
@@ -254,8 +234,8 @@ describe("DataForSEO SDK-backed endpoints", () => {
   });
 
   it("serializes LLM mentions keyword targets", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
+    gateway.mockResolvedValue(
+      envelope({
         status_code: 20000,
         tasks: [
           {
@@ -268,7 +248,6 @@ describe("DataForSEO SDK-backed endpoints", () => {
         ],
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     await fetchLlmMentionsSearch({
       target: buildLlmTarget({
@@ -280,7 +259,7 @@ describe("DataForSEO SDK-backed endpoints", () => {
       languageCode: "en",
     });
 
-    expect(parseDataforseoRequestBody(fetchMock.mock.calls[0]?.[1])).toEqual([
+    expect(requestOf().args.body).toEqual([
       {
         target: [
           {
@@ -299,8 +278,8 @@ describe("DataForSEO SDK-backed endpoints", () => {
   });
 
   it("preserves web_search for Perplexity LLM responses", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
+    gateway.mockResolvedValue(
+      envelope({
         status_code: 20000,
         tasks: [
           {
@@ -326,7 +305,6 @@ describe("DataForSEO SDK-backed endpoints", () => {
         ],
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     await fetchLlmResponse({
       userPrompt: "What is OpenSEO?",
@@ -336,16 +314,11 @@ describe("DataForSEO SDK-backed endpoints", () => {
       webSearchCountryCode: "US",
     });
 
-    expect(
-      fetchMock.mock.calls.map(([url]) =>
-        typeof url === "string" || url instanceof URL
-          ? url.toString()
-          : url.url,
-      ),
-    ).toEqual([
-      "https://api.dataforseo.com/v3/ai_optimization/perplexity/llm_responses/live",
-    ]);
-    expect(parseDataforseoRequestBody(fetchMock.mock.calls[0]?.[1])).toEqual([
+    const request = requestOf();
+    expect(request.address).toBe(
+      address("/v3/ai_optimization/perplexity/llm_responses/live"),
+    );
+    expect(request.args.body).toEqual([
       {
         user_prompt: "What is OpenSEO?",
         model_name: "sonar",
@@ -358,14 +331,7 @@ describe("DataForSEO SDK-backed endpoints", () => {
 });
 
 describe("fetchLlmResponse model_name validation", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("rejects an unknown model_name before dispatching a paid LLM task", async () => {
-    const fetchMock = vi.fn<typeof fetch>();
-    vi.stubGlobal("fetch", fetchMock);
-
     await expect(
       fetchLlmResponse({
         userPrompt: "What is OpenSEO?",
@@ -375,6 +341,6 @@ describe("fetchLlmResponse model_name validation", () => {
       }),
     ).rejects.toThrow(/Unsupported DataForSEO model_name/);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(gateway).not.toHaveBeenCalled();
   });
 });

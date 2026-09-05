@@ -1,45 +1,38 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/server/lib/runtime-env", () => ({
-  getRequiredEnvValue: vi.fn(async () => "test-api-key"),
-}));
+vi.mock("@/server/lib/executor/client", () => ({ invokeTool: vi.fn() }));
 
 import {
   fetchLiveSerp,
   fetchRankCheckTaskResult,
   postRankCheckTasks,
 } from "@/server/lib/dataforseo/serp";
-
-function parseDataforseoRequestBody(init: RequestInit | undefined): unknown {
-  const body = init?.body;
-  if (typeof body !== "string") {
-    throw new Error("Expected DataForSEO request body to be a string");
-  }
-  return JSON.parse(body) as unknown;
-}
+import {
+  address,
+  envelope,
+  gateway,
+  requestOf,
+} from "@/server/lib/dataforseo/gateway-test-support";
 
 describe("live SERP", () => {
   // 40102 is the documented "No Search Results." code (40501 is "Invalid
   // Field."). isNoResultsTask matches on the status message, not the code, so
   // this stays correct whichever code DataForSEO attaches to the message.
   it("returns an empty result for DataForSEO's no-results task", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>().mockResolvedValue(
-        Response.json({
-          status_code: 20000,
-          tasks: [
-            {
-              status_code: 40102,
-              status_message: "No Search Results.",
-              path: ["v3", "serp", "google", "organic", "live", "advanced"],
-              cost: 0.002,
-              result_count: 0,
-              result: [],
-            },
-          ],
-        }),
-      ),
+    gateway.mockResolvedValue(
+      envelope({
+        status_code: 20000,
+        tasks: [
+          {
+            status_code: 40102,
+            status_message: "No Search Results.",
+            path: ["v3", "serp", "google", "organic", "live", "advanced"],
+            cost: 0.002,
+            result_count: 0,
+            result: [],
+          },
+        ],
+      }),
     );
 
     await expect(
@@ -56,13 +49,9 @@ describe("live SERP", () => {
 });
 
 describe("rank check task queue", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("posts queued tasks, maps ids by tag, and sums cost over all entries", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
+    gateway.mockResolvedValue(
+      envelope({
         status_code: 20000,
         tasks: [
           {
@@ -87,7 +76,6 @@ describe("rank check task queue", () => {
         ],
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     const result = await postRankCheckTasks({
       tasks: [
@@ -101,13 +89,8 @@ describe("rank check task queue", () => {
       targetDomain: "example.com",
     });
 
-    expect(
-      fetchMock.mock.calls.map(([url]) =>
-        typeof url === "string" || url instanceof URL
-          ? url.toString()
-          : url.url,
-      ),
-    ).toEqual(["https://api.dataforseo.com/v3/serp/google/organic/task_post"]);
+    const request = requestOf();
+    expect(request.address).toBe(address("/v3/serp/google/organic/task_post"));
 
     // Every posted task asks DataForSEO to stop crawling at the target's
     // organic listing — that is what cuts the actual crawl cost for ranking
@@ -118,9 +101,7 @@ describe("rank check task queue", () => {
       ],
       find_targets_in: ["organic"],
     };
-    expect(
-      parseDataforseoRequestBody(fetchMock.mock.calls[0]?.[1]),
-    ).toMatchObject([stopCrawl, stopCrawl, stopCrawl]);
+    expect(request.args.body).toMatchObject([stopCrawl, stopCrawl, stopCrawl]);
     expect(result.data).toEqual([
       {
         keyword: "alpha",
@@ -147,13 +128,12 @@ describe("rank check task queue", () => {
   });
 
   it("reports a queued task still in progress as pending", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
+    gateway.mockResolvedValue(
+      envelope({
         status_code: 20000,
         tasks: [{ id: "task-a", status_code: 40602 }],
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     const outcome = await fetchRankCheckTaskResult({
       taskId: "task-a",
@@ -163,11 +143,15 @@ describe("rank check task queue", () => {
     });
 
     expect(outcome).toEqual({ status: "pending" });
+    expect(requestOf()).toEqual({
+      address: address("/v3/serp/google/organic/task_get/advanced/{id}"),
+      args: { id: "task-a" },
+    });
   });
 
   it("parses a completed queued task into a rank check result", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
+    gateway.mockResolvedValue(
+      envelope({
         status_code: 20000,
         tasks: [
           {
@@ -192,7 +176,6 @@ describe("rank check task queue", () => {
         ],
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     const outcome = await fetchRankCheckTaskResult({
       taskId: "task-a",

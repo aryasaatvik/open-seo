@@ -1,20 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/server/lib/runtime-env", () => ({
-  getRequiredEnvValue: vi.fn(async () => "test-api-key"),
-}));
+vi.mock("@/server/lib/executor/client", () => ({ invokeTool: vi.fn() }));
 
 import { DataforseoChargedTaskError } from "@/server/lib/dataforseo/envelope";
 import { fetchLighthouseResult } from "@/server/lib/dataforseo/lighthouse";
-
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
+import {
+  envelope,
+  gateway,
+  httpFailure,
+} from "@/server/lib/dataforseo/gateway-test-support";
 
 describe("fetchLighthouseResult", () => {
   it("carries billing metadata when parsing fails after a billed success", async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      Response.json({
+    gateway.mockResolvedValue(
+      envelope({
         status_code: 20000,
         status_message: "Ok.",
         tasks: [
@@ -36,7 +35,6 @@ describe("fetchLighthouseResult", () => {
         ],
       }),
     );
-    vi.stubGlobal("fetch", fetchMock);
 
     const rejection = fetchLighthouseResult({
       url: "https://example.com/",
@@ -53,10 +51,7 @@ describe("fetchLighthouseResult", () => {
   });
 
   it("does not retry an HTTP 5xx (the provider may have charged the task)", async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockResolvedValue(new Response("upstream failure", { status: 503 }));
-    vi.stubGlobal("fetch", fetchMock);
+    gateway.mockResolvedValue(httpFailure(503));
 
     await expect(
       fetchLighthouseResult({
@@ -64,6 +59,6 @@ describe("fetchLighthouseResult", () => {
         strategy: "mobile",
       }),
     ).rejects.toMatchObject({ code: "UPSTREAM_UNAVAILABLE" });
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(gateway).toHaveBeenCalledOnce();
   });
 });
