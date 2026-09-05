@@ -175,6 +175,7 @@ const resolveSelfHostAccess = (
   stage: string,
   provision: boolean,
   workersSubdomain: string,
+  customDomain: string,
 ) =>
   Effect.gen(function* () {
     let teamDomain = yield* optionalVar("TEAM_DOMAIN");
@@ -249,7 +250,9 @@ const resolveSelfHostAccess = (
         applicationId: "SelfHostAccess",
         policyName: `open-seo ${stage} self-host users`,
         applicationName: `open-seo ${stage}`,
-        domain: `${workerName(stage)}.${subdomain}`,
+        // The hostname users actually hit: the custom domain when set,
+        // otherwise the worker's workers.dev hostname.
+        domain: customDomain || `${workerName(stage)}.${subdomain}`,
         emails: allowedEmails,
       });
       policyAud = application.aud;
@@ -315,6 +318,9 @@ export default Alchemy.Stack(
     );
     const databaseProvider = yield* optionalVar("DATABASE_PROVIDER");
     const workersSubdomain = yield* readWorkersSubdomain({ required: false });
+    // Optional custom hostname for the app worker (zone must be on this
+    // account). The Access application is bound to it as well.
+    const customDomain = yield* optionalVar("DOMAIN");
 
     // Auth needs an absolute BETTER_AUTH_URL. Prod sets it explicitly;
     // previews always derive it from the deterministic worker name — a wrong
@@ -356,6 +362,7 @@ export default Alchemy.Stack(
       stage,
       authMode === "cloudflare_access" && !prod,
       workersSubdomain,
+      customDomain,
     );
 
     // Created once and bound into BOTH workers — they share the same
@@ -378,13 +385,9 @@ export default Alchemy.Stack(
         date: wrangler.compatibility_date,
         flags: wrangler.compatibility_flags,
       },
-      // Audit workflow steps parse and persist batches of HTML — the same
-      // CPU allowance the app worker used to carry for them. Configurable
-      // CPU limits are a paid-plan feature; self-host deploys
-      // (cloudflare_access) may run on the free plan, which rejects them.
-      ...(authMode === "cloudflare_access"
-        ? {}
-        : { limits: { cpuMs: 300_000 } }),
+      // Audit workflow steps parse and persist batches of HTML. Configurable
+      // CPU limits are a paid-plan feature; this fork deploys on Workers Paid.
+      limits: { cpuMs: 300_000 },
       observability: {
         enabled: wrangler.observability?.enabled ?? true,
         traces: { enabled: wrangler.observability?.traces?.enabled ?? false },
@@ -422,8 +425,13 @@ export default Alchemy.Stack(
 
     const app = yield* Cloudflare.Worker("open-seo", {
       name: workerName(stage),
-      // Prod serves the real domains; the zone is inferred from the hostname.
-      domain: prod ? ["app.openseo.so", "www.app.openseo.so"] : undefined,
+      // Prod serves the real domains; other stages take DOMAIN when set. The
+      // zone is inferred from the hostname.
+      domain: prod
+        ? ["app.openseo.so", "www.app.openseo.so"]
+        : customDomain
+          ? [customDomain]
+          : undefined,
       // Prebuilt worker from `vite build` (@cloudflare/vite-plugin). The entry
       // exports the DO + WorkflowEntrypoint classes (re-exported by
       // src/server.ts), which `bundle: false` requires. Sibling chunks under
@@ -437,15 +445,9 @@ export default Alchemy.Stack(
         date: wrangler.compatibility_date,
         flags: wrangler.compatibility_flags,
       },
-      // Site audits moved to the open-seo-audit worker, but RankCheckWorkflow
-      // still parses SERP batches here — keep the CPU allowance until that
-      // workflow's per-tick CPU is measured or it moves too. Configurable CPU
-      // limits are a paid-plan feature, and self-host deploys
-      // (cloudflare_access) may run on the free plan — which rejects them —
-      // so those get the plan default instead.
-      ...(authMode === "cloudflare_access"
-        ? {}
-        : { limits: { cpuMs: 300_000 } }),
+      // RankCheckWorkflow parses SERP batches here. Configurable CPU limits
+      // are a paid-plan feature; this fork deploys on Workers Paid.
+      limits: { cpuMs: 300_000 },
       observability: {
         enabled: wrangler.observability?.enabled ?? true,
         traces: { enabled: wrangler.observability?.traces?.enabled ?? false },
