@@ -59,6 +59,20 @@ async function fingerprintOf(statements: readonly string[]): Promise<string> {
   ).join("");
 }
 
+// The fingerprint row is written twice: `pending:<hash>` before any DDL runs,
+// then `<hash>` once the schema, the secrets table, and the marker are all in
+// place. A restart after an interrupted setup finds the pending row, skips
+// the collision check (the tables are ours), and reruns the idempotent DDL.
+const PENDING_PREFIX = "pending:";
+
+async function ensureFingerprintTable(db: D1Database): Promise<void> {
+  await db
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS "${FINGERPRINT_TABLE}" (id text PRIMARY KEY NOT NULL, fingerprint text NOT NULL)`,
+    )
+    .run();
+}
+
 async function readFingerprint(db: D1Database): Promise<string | null> {
   const exists = await db
     .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
@@ -74,11 +88,7 @@ async function readFingerprint(db: D1Database): Promise<string | null> {
 }
 
 async function writeFingerprint(db: D1Database, value: string): Promise<void> {
-  await db
-    .prepare(
-      `CREATE TABLE IF NOT EXISTS "${FINGERPRINT_TABLE}" (id text PRIMARY KEY NOT NULL, fingerprint text NOT NULL)`,
-    )
-    .run();
+  await ensureFingerprintTable(db);
   await db
     .prepare(
       `INSERT INTO "${FINGERPRINT_TABLE}" (id, fingerprint) VALUES ('runtime', ?)
@@ -91,7 +101,8 @@ async function writeFingerprint(db: D1Database, value: string): Promise<void> {
 // Executor shares the app's D1. Before the first bring-up, refuse to run if
 // any table Executor is about to create already exists: that would be an
 // OpenSEO table with a colliding name, and `CREATE TABLE IF NOT EXISTS` would
-// silently adopt it. Once the fingerprint row exists the tables are ours.
+// silently adopt it. Once a fingerprint row exists, pending or final, the
+// tables are ours.
 async function assertNoTableCollision(
   db: D1Database,
   tableNames: readonly string[],
@@ -166,6 +177,7 @@ function buildExecutor(
         if (prepared !== expected) {
           if (prepared === null) {
             await assertNoTableCollision(env.DB, Object.keys(tables));
+            await writeFingerprint(env.DB, `${PENDING_PREFIX}${expected}`);
           }
           await ensureDrizzleRuntimeSchemaFromTables(
             { run: (query) => drizzleDb.run(query) },

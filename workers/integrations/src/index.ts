@@ -84,7 +84,7 @@ let ready: Promise<GatewayExecutor> | null = null;
 function readyExecutor(env: GatewayEnv): Promise<GatewayExecutor> {
   ready ??= (async () => {
     const executor = await getExecutor(env);
-    await run(bootstrap(executor, env.DATAFORSEO_API_KEY));
+    await run(bootstrap(executor, env.DB, env.DATAFORSEO_API_KEY));
     console.log("gateway: catalog ready");
     return executor;
   })().catch((error: unknown) => {

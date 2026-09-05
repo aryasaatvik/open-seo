@@ -16,6 +16,10 @@ const TABLE = "openseo_integration_secrets";
 const KEY_SALT = "open-seo/integration-secrets/v1";
 const PAYLOAD_VERSION = "v1";
 const PROVIDER_KEY = ProviderKey.make("openseo-d1");
+// The AES key is derived from this string with a fixed salt, so its entropy
+// is the whole defense if the ciphertext leaks. 32 characters is the floor
+// `openssl rand -base64 32` clears; the deploy preflight enforces the same.
+const MIN_MASTER_KEY_LENGTH = 32;
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -90,10 +94,44 @@ export async function ensureSecretsTable(db: D1Database): Promise<void> {
     .run();
 }
 
+// Non-secret bookkeeping values (digests, markers) share the table under
+// reserved ids and are stored in the clear.
+const MARKER_PREFIX = "marker:";
+
+export async function readMarker(
+  db: D1Database,
+  id: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare(`SELECT payload FROM "${TABLE}" WHERE id = ?`)
+    .bind(`${MARKER_PREFIX}${id}`)
+    .first<{ payload: string }>();
+  return row?.payload ?? null;
+}
+
+export async function writeMarker(
+  db: D1Database,
+  id: string,
+  value: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO "${TABLE}" (id, payload, updated_at) VALUES (?, ?, current_timestamp)
+       ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = current_timestamp`,
+    )
+    .bind(`${MARKER_PREFIX}${id}`, value)
+    .run();
+}
+
 export function makeD1SecretProvider(
   db: D1Database,
   masterKey: string,
 ): CredentialProvider {
+  if (masterKey.length < MIN_MASTER_KEY_LENGTH) {
+    throw new Error(
+      `EXECUTOR_SECRET_KEY must be at least ${MIN_MASTER_KEY_LENGTH} characters (openssl rand -base64 32)`,
+    );
+  }
   const keyPromise = deriveKey(masterKey);
   const storage = (message: string) => (cause: unknown) =>
     new StorageError({ message, cause });

@@ -14,6 +14,7 @@ import {
   GOOGLE_TOKEN_URL,
 } from "./catalog";
 import type { GatewayExecutor } from "./executor";
+import { readMarker, writeMarker } from "./secrets";
 import dataforseoSpec from "../specs/dataforseo.json";
 import { CONNECTION_NAME } from "../../../src/shared/integration-addresses";
 
@@ -78,32 +79,55 @@ const registerGoogle = (executor: GatewayExecutor) =>
     { discard: true },
   );
 
+// The connection value is the configured key. A rotated DATAFORSEO_API_KEY
+// must replace the stored one, so a digest of the configured key is kept next
+// to the connection and compared on every bring-up; a mismatch recreates the
+// connection with the new value.
+const KEY_DIGEST_ID = "dataforseo:configured-key-sha256";
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
 const ensureDataforseoConnection = (
   executor: GatewayExecutor,
+  db: D1Database,
   apiKey: string,
 ) =>
   Effect.gen(function* () {
-    const connections = yield* executor.connections.list({
-      integration: IntegrationSlug.make(DATAFORSEO_INTEGRATION),
-    });
-    if (connections.some((connection) => connection.name === CONNECTION_NAME)) {
-      return;
+    const integration = IntegrationSlug.make(DATAFORSEO_INTEGRATION);
+    const name = ConnectionName.make(CONNECTION_NAME);
+    const digest = yield* Effect.promise(() => sha256Hex(apiKey));
+    const stored = yield* Effect.promise(() => readMarker(db, KEY_DIGEST_ID));
+    const connections = yield* executor.connections.list({ integration });
+    const existing = connections.find((connection) => connection.name === name);
+    if (existing && stored === digest) return;
+    if (existing) {
+      yield* executor.connections.remove({ owner: "org", integration, name });
     }
     yield* executor.connections.create({
       owner: "org",
-      name: ConnectionName.make(CONNECTION_NAME),
-      integration: IntegrationSlug.make(DATAFORSEO_INTEGRATION),
+      name,
+      integration,
       template: AuthTemplateSlug.make(DATAFORSEO_AUTH_TEMPLATE),
       value: apiKey,
     });
+    yield* Effect.promise(() => writeMarker(db, KEY_DIGEST_ID, digest));
   });
 
 export const bootstrap = (
   executor: GatewayExecutor,
+  db: D1Database,
   dataforseoApiKey: string,
 ) =>
   Effect.gen(function* () {
     yield* registerDataforseo(executor);
     yield* registerGoogle(executor);
-    yield* ensureDataforseoConnection(executor, dataforseoApiKey);
+    yield* ensureDataforseoConnection(executor, db, dataforseoApiKey);
   });

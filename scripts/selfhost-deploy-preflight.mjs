@@ -48,9 +48,11 @@ if (!env.DATAFORSEO_API_KEY) {
     `${em("DATAFORSEO_API_KEY")} is not set in ${envFile} — see docs/DATAFORSEO_API_KEY.md for how to get one.`,
   );
 }
-if (!env.EXECUTOR_SECRET_KEY) {
+// The gateway derives its AES key from this value with a fixed salt, so a
+// short key is an offline-guessable key. Same floor the worker enforces.
+if (!env.EXECUTOR_SECRET_KEY || env.EXECUTOR_SECRET_KEY.length < 32) {
   fail(
-    `${em("EXECUTOR_SECRET_KEY")} is not set in ${envFile} — the integration gateway encrypts every stored credential with it.`,
+    `${em("EXECUTOR_SECRET_KEY")} must be set in ${envFile} and at least 32 characters — the integration gateway encrypts every stored credential with it.`,
     "",
     `  ${cmd("openssl rand -base64 32")}`,
   );
