@@ -19,10 +19,13 @@ const WORKER_PREFIX = "open-seo";
 // self-hoster's stage name can't collide with the adoption path.
 export const HOSTED_PROD_STAGE = "hosted-prod";
 
-// Stages that own the unsuffixed resource names: hosted production and this
-// fork's single self-host deployment. Every other stage (previews) is
-// suffixed so several can coexist on one account.
-const UNSUFFIXED_STAGES = new Set([HOSTED_PROD_STAGE, "selfhost"]);
+// This fork's single self-host deployment (seo.arya.sh).
+export const SELFHOST_STAGE = "selfhost";
+
+// Stages that own the unsuffixed resource names: hosted production and the
+// self-host deployment. Every other stage (previews) is suffixed so several
+// can coexist on one account.
+const UNSUFFIXED_STAGES = new Set([HOSTED_PROD_STAGE, SELFHOST_STAGE]);
 
 export const stageSuffix = (stage: string) =>
   UNSUFFIXED_STAGES.has(stage) ? "" : `-${stage}`;

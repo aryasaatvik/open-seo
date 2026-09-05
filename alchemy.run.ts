@@ -13,6 +13,7 @@ import {
   HOSTED_PROD_STAGE,
   readWorkersSubdomain,
   requireAllowedEmails,
+  SELFHOST_STAGE,
   stageSuffix,
   workerName,
 } from "./alchemy.access.ts";
@@ -82,10 +83,10 @@ const PROD_NAMES = {
 
 const makeResources = (stage: string) => {
   const prod = stage === HOSTED_PROD_STAGE;
-  // Prod adopts the LIVE resources; retain makes `alchemy destroy --stage
-  // hosted-prod` (or an orphaning refactor) forget state instead of deleting
-  // them.
-  const keep = Alchemy.RemovalPolicy.retain(prod);
+  // Prod adopts the LIVE resources and selfhost holds the only copy of its
+  // data; retain makes `alchemy destroy` (or an orphaning refactor) forget
+  // state instead of deleting them. Redeploy after a destroy with `--adopt`.
+  const keep = Alchemy.RemovalPolicy.retain(prod || stage === SELFHOST_STAGE);
   return {
     DB: Cloudflare.D1.Database("DB", {
       name: prod ? PROD_NAMES.d1 : `open-seo-db${stageSuffix(stage)}`,

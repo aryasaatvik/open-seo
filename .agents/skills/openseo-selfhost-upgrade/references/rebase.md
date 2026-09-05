@@ -30,6 +30,7 @@ Resolve by intent, not by side. The fork's intent is narrow: one paid-plan deplo
 | `DOMAIN` custom hostname | Upstream has no equivalent var | Upstream's current `domain:` prop on the app worker and the Access application's `domain`. If upstream adds its own custom-domain var, adopt it, drop the fork var, and update `.env.selfhost` in the same change |
 | `url: !customDomain` | Upstream still exposes workers.dev for self-host | The worker's current route or `url` option |
 | Unconditional `limits.cpuMs` | Upstream still gates it on `authMode` | The current `limits` prop. If upstream adds a plan flag, set it instead |
+| Retain on `selfhost` | Upstream still retains only `hosted-prod` | Whatever predicate upstream passes to `RemovalPolicy.retain` in `makeResources`. D1, R2, and KV must stay retained; workers may be deleted |
 
 Rules:
 

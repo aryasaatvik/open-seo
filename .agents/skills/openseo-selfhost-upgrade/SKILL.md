@@ -43,7 +43,7 @@ The script is read-only. It never fetches, switches branches, installs, or deplo
 - `~/Developer/open-seo` stays on `dev`. `main` mirrors `upstream/main` and receives no fork commits. `~/Developer/open-seo-worktrees/upstream` is a detached read-only view of `upstream/main`.
 - Every fork-only commit uses the Conventional Commit scope `selfhost` (`fix(selfhost):`, `docs(selfhost):`, ...). Preflight lists any fork-only commit that lacks it.
 - No upstream PRs. Fork changes land directly on `dev` after local gates.
-- One deployment, stage `selfhost`, unsuffixed resource names. Never create a second stage on the Arya Labs account with the name `selfhost`, and never run `alchemy destroy --stage selfhost` casually: the selfhost stage does not retain D1, R2, or KV, so destroy deletes the data.
+- One deployment, stage `selfhost`, unsuffixed resource names. Never create a second stage on the Arya Labs account with the name `selfhost`. D1, R2, and KV are retained on destroy (fork patch), so a destroy leaves them orphaned and the next deploy needs `--adopt`.
 - `.env.selfhost` is the complete binding set. Alchemy replaces every var and secret on each deploy, so a key missing from the file deploys as empty. Never commit it and never echo its values.
 - Use the repo's `pnpm` scripts for build, typecheck, and deploy. Use Wrangler only for D1 inspection and reads; alchemy owns the resources.
 - Use Executor through MCP for live Cloudflare inspection (worker versions, logs, Access apps). Never the Executor CLI.

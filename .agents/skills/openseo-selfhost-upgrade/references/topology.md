@@ -30,6 +30,7 @@ Current patches, all in the deploy layer:
 | `fix(selfhost): drop the workers.dev route when DOMAIN is set` | `alchemy.run.ts` | `url: !customDomain` so the app has no unauthenticated public hostname |
 | `fix(selfhost): give the selfhost stage unsuffixed resource names` | `alchemy.access.ts`, `alchemy.run.ts` | `stageSuffix(stage)` returns `""` for `hosted-prod` and `selfhost`; every D1/R2/KV/workflow/Access name uses it |
 | `docs(selfhost): add the selfhost upgrade skill` | `.agents/skills/openseo-selfhost-upgrade/**`, `.claude/skills/openseo-selfhost-upgrade`, `knip.jsonc` | This skill; knip excludes skill helper scripts |
+| `fix(selfhost): retain D1, R2, and KV on the selfhost stage` | `alchemy.access.ts`, `alchemy.run.ts` | Exports `SELFHOST_STAGE`; `makeResources` retains the data-bearing resources for `hosted-prod` and `selfhost` |
 
 Application code is unpatched. If a future patch has to touch `src/`, add it to this table and to the conflict policy in `rebase.md`.
 
@@ -39,9 +40,9 @@ Application code is unpatched. If a future patch has to touch `src/`, add it to 
 | --- | --- | --- |
 | Worker | `open-seo` | App worker, custom domain `seo.arya.sh`, crons `*/5 * * * *` and `17 3 * * *`, no workers.dev route |
 | Worker | `open-seo-audit` | Bound into the app as `AUDIT_ENGINE` |
-| D1 | `open-seo-db` | Drizzle SQL from `drizzle/`, tracked in table `d1_migrations`. Not retained on destroy |
-| KV | `open-seo-kv`, `open-seo-oauth-kv` | Not retained on destroy |
-| R2 | `open-seo-r2` | DataForSEO response cache. Not retained on destroy |
+| D1 | `open-seo-db` | Drizzle SQL from `drizzle/`, tracked in table `d1_migrations`. Retained on destroy |
+| KV | `open-seo-kv`, `open-seo-oauth-kv` | Retained on destroy |
+| R2 | `open-seo-r2` | DataForSEO response cache. Retained on destroy |
 | Workflows | `site-audit-workflow`, `rank-check-workflow` | Names are alchemy resource ids; a rename orphans the live registration |
 | Durable Objects | `ONBOARDING_CHAT`, `SAM_CHAT`, audit scratchpad | SQLite-backed, declared in `wrangler.jsonc` migrations |
 | Access | app `open-seo`, policy `open-seo users` | Zero Trust team `aryalabs.cloudflareaccess.com`, emails from `ACCESS_ALLOWED_EMAILS`. Dashboard edits are overwritten each deploy |

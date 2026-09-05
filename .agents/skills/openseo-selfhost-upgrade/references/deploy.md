@@ -64,7 +64,7 @@ Alchemy has no rollback command. Roll back by deploying the previous SHA:
 git switch --detach <previous-sha> && pnpm deploy:selfhost --yes
 ```
 
-D1 migrations already applied stay applied. If a migration must be reversed, restore from the export taken in the migration gate. Never `alchemy destroy --stage selfhost` as a rollback step; on this stage it deletes D1, KV, and R2.
+D1 migrations already applied stay applied. If a migration must be reversed, restore from the export taken in the migration gate. Never `alchemy destroy --stage selfhost` as a rollback step; it deletes the workers, Access application, and workflows, and orphans the data resources.
 
 ## Destroy
 
@@ -74,4 +74,10 @@ Only for a deliberate teardown or rename, with the user's explicit yes in this s
 pnpm alchemy destroy --env-file .env.selfhost --stage selfhost --yes
 ```
 
-Export D1 first. A destroy plus deploy is how the stage was renamed to unsuffixed names on 2026-09-05, when the database was still empty.
+D1, R2, and KV are retained: destroy forgets them from state and leaves them on the account. The next deploy must adopt them by name or it fails on the existing names:
+
+```bash
+node scripts/selfhost-deploy-preflight.mjs && vite build --mode selfhost && pnpm alchemy deploy --env-file .env.selfhost --stage selfhost --adopt --yes
+```
+
+Export D1 first anyway. A destroy plus deploy is how the stage was renamed to unsuffixed names on 2026-09-05, before retain was in place and while the database was still empty.
