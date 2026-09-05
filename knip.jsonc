@@ -32,6 +32,9 @@
     // Alchemy state/bundle artifacts (gitignored)
     "!.alchemy/**",
     "!badseo/**",
+    // Agent skill helpers run directly with bun, never imported by the app
+    "!.agents/skills/**",
+    "!.claude/skills/**",
   ],
   "ignore": ["drizzle-prod.config.ts"],
   // Disable Drizzle plugin - it tries to load drizzle.config.ts which imports cloudflare:workers
