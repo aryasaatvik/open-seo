@@ -185,9 +185,10 @@ const resolveSelfHostAccess = (
     let teamDomain = yield* optionalVar("TEAM_DOMAIN");
     let policyAud: Alchemy.Input<string> = yield* optionalVar("POLICY_AUD");
     if (!provision || (teamDomain && policyAud)) {
-      return { teamDomain, policyAud };
+      return { teamDomain, policyAud, serviceTokenAliases: "" };
     }
     const { accountId } = yield* yield* Cloudflare.CloudflareEnvironment;
+    const serviceTokens = yield* resolveServiceTokens(accountId);
 
     // The workers.dev subdomain names both the Access application's hostname
     // (which must exist before the Worker resource does) and an auto-created
@@ -258,11 +259,64 @@ const resolveSelfHostAccess = (
         // otherwise the worker's workers.dev hostname.
         domain: customDomain || `${workerName(stage)}.${subdomain}`,
         emails: allowedEmails,
+        serviceTokenIds: serviceTokens.map((token) => token.id),
       });
       policyAud = application.aud;
     }
 
-    return { teamDomain, policyAud };
+    return {
+      teamDomain,
+      policyAud,
+      serviceTokenAliases: serviceTokens
+        .map((token) => `${token.clientId}=${token.email}`)
+        .join(","),
+    };
+  });
+
+/**
+ * ACCESS_SERVICE_TOKENS: `<service-token-id>=<email>,...`. Each Access
+ * service token (Zero Trust -> Access -> Service Auth) is admitted by a
+ * Service Auth policy on the application and acts as the named user inside
+ * the app (see src/middleware/ensure-user/cloudflareAccess.ts). The token's
+ * client id — what the Access JWT carries as `common_name` — is read here so
+ * the env file only needs the token id shown in the dashboard.
+ */
+const resolveServiceTokens = (accountId: string) =>
+  Effect.gen(function* () {
+    const entries = (yield* optionalVar("ACCESS_SERVICE_TOKENS"))
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    const tokens: { id: string; clientId: string; email: string }[] = [];
+    for (const entry of entries) {
+      const [id, email] = entry.split("=").map((part) => part.trim());
+      if (!id || !email) {
+        return yield* Effect.die(
+          new Error(
+            `ACCESS_SERVICE_TOKENS entries are <service-token-id>=<email>; got "${entry}".`,
+          ),
+        );
+      }
+      const token = yield* ZeroTrust.getAccessServiceTokenForAccount({
+        accountId,
+        serviceTokenId: id,
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.die(
+            new Error(
+              `Could not read Access service token ${id}: ${String(error)}${accessScopeHint}`,
+            ),
+          ),
+        ),
+      );
+      if (!token.clientId) {
+        return yield* Effect.die(
+          new Error(`Access service token ${id} has no client id.`),
+        );
+      }
+      tokens.push({ id, clientId: token.clientId, email });
+    }
+    return tokens;
   });
 
 // Secrets/vars resolve from the env file passed to `alchemy deploy`
@@ -472,6 +526,7 @@ export default Alchemy.Stack(
         BETTER_AUTH_URL: authUrl,
         TEAM_DOMAIN: access.teamDomain,
         POLICY_AUD: access.policyAud,
+        ACCESS_SERVICE_TOKEN_ALIASES: access.serviceTokenAliases,
 
         // Prod-only: pooled Postgres via the existing Hyperdrive config.
         ...(prodHyperdrive ? { HYPERDRIVE: prodHyperdrive } : {}),

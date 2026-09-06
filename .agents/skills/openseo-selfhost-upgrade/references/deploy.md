@@ -10,7 +10,7 @@ The file is the whole binding set. Alchemy sets every var and secret from it on 
 diff <(rg -o '^[A-Z_]+' .env.selfhost | sort) <(rg -o '^#? ?[A-Z_]+(?==)' .env.selfhost.example | tr -d '# ' | sort)
 ```
 
-Keys currently set: `DATAFORSEO_API_KEY`, `ACCESS_ALLOWED_EMAILS`, `DOMAIN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`, `OPENROUTER_API_KEY`, `OPENSEO_TELEMETRY_DISABLED`. Preflight reports this list by name.
+Keys currently set: `DATAFORSEO_API_KEY`, `ACCESS_ALLOWED_EMAILS`, `DOMAIN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`, `OPENROUTER_API_KEY`, `OPENSEO_TELEMETRY_DISABLED`, `ACCESS_SERVICE_TOKENS` (the `openseo-executor` Access service token, acting as the admin user). Preflight reports this list by name.
 
 Rules:
 

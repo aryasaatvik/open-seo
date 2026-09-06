@@ -82,6 +82,10 @@ Add the teammate to `ACCESS_ALLOWED_EMAILS` in `.env.selfhost` and redeploy. Das
 
 Everyone allowed through Cloudflare Access works in one shared workspace and sees the same projects. Deployments upgraded from older versions (which gave each user a separate workspace) show a one-time dashboard banner — clicking it migrates all previous per-user work into the shared workspace.
 
+## Machine clients (service tokens)
+
+A machine client such as an Executor instance can call `/mcp` with a Cloudflare Access service token instead of a browser login. Create the token under Zero Trust -> Access -> Service Auth, then add it to `.env.selfhost` as `ACCESS_SERVICE_TOKENS=<service-token-id>=<email>` and redeploy. The deploy adds a Service Auth policy for the token and the app treats requests carrying it as that user, who must be in `ACCESS_ALLOWED_EMAILS` and have signed in once. The client sends the token as the `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers.
+
 ## Troubleshooting
 
 - Login fails: re-check `ACCESS_ALLOWED_EMAILS` in `.env.selfhost` and redeploy.

@@ -68,7 +68,13 @@ export const requireAllowedEmails = (remedy: string) =>
     return emails;
   });
 
-/** The gate itself: an email allow-policy on a self-hosted Access application. */
+/**
+ * The gate itself: an email allow-policy on a self-hosted Access application,
+ * plus an optional Service Auth policy for machine clients (Access service
+ * tokens, see ACCESS_SERVICE_TOKENS). Both policies are alchemy-owned; the
+ * application's policy list is reconciled on every deploy, so a policy added
+ * in the dashboard would not survive.
+ */
 export const emailAccessGate = (options: {
   policyId: string;
   applicationId: string;
@@ -76,6 +82,7 @@ export const emailAccessGate = (options: {
   applicationName: string;
   domain: string;
   emails: string[];
+  serviceTokenIds?: string[];
 }) =>
   Effect.gen(function* () {
     const allow = yield* Cloudflare.Access.Policy(options.policyId, {
@@ -83,10 +90,24 @@ export const emailAccessGate = (options: {
       decision: "allow",
       include: options.emails.map((email) => ({ email: { email } })),
     });
+    const policies = [allow.policyId];
+    if (options.serviceTokenIds?.length) {
+      const serviceAuth = yield* Cloudflare.Access.Policy(
+        `${options.policyId}ServiceAuth`,
+        {
+          name: `${options.policyName} (service tokens)`,
+          decision: "non_identity",
+          include: options.serviceTokenIds.map((tokenId) => ({
+            serviceToken: { tokenId },
+          })),
+        },
+      );
+      policies.push(serviceAuth.policyId);
+    }
     return yield* Cloudflare.Access.Application(options.applicationId, {
       type: "self_hosted",
       name: options.applicationName,
       domain: options.domain,
-      policies: [allow.policyId],
+      policies,
     });
   });

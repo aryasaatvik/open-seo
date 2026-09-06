@@ -4,6 +4,7 @@ import {
   ensureDelegatedOrganizationForUser,
   ensureSharedWorkspaceOrganization,
 } from "@/server/auth/delegated-organization";
+import { AppError } from "@/server/lib/errors";
 import { eq } from "drizzle-orm";
 import type { EnsuredUserContext } from "./types";
 
@@ -96,6 +97,25 @@ export async function resolveSharedWorkspaceContext(
     // full control of the shared workspace.
     role: "owner",
   };
+}
+
+// A service token acts as an existing user: the alias names an email, and the
+// user row must already exist (the person has signed in at least once), since a
+// token has no Access `sub` to create one from.
+export async function resolveSharedWorkspaceContextByEmail(
+  userEmail: string,
+): Promise<EnsuredUserContext> {
+  const existing = await db.query.user.findFirst({
+    columns: { id: true },
+    where: eq(user.email, userEmail),
+  });
+  if (!existing) {
+    throw new AppError(
+      "AUTH_CONFIG_MISSING",
+      `Service token alias points at ${userEmail}, but no user with that email has signed in yet. Sign in through Cloudflare Access once, then retry.`,
+    );
+  }
+  return resolveSharedWorkspaceContext(existing.id, userEmail);
 }
 
 export async function resolveLocalNoAuthContext(): Promise<EnsuredUserContext> {

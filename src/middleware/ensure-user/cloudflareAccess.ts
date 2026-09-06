@@ -3,7 +3,10 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { AppError } from "@/server/lib/errors";
 import { validateTeamDomain } from "@/shared/selfhost-checks";
 import { classifyAccessVerificationError } from "./accessTokenErrors";
-import { resolveSharedWorkspaceContext } from "./delegated";
+import {
+  resolveSharedWorkspaceContext,
+  resolveSharedWorkspaceContextByEmail,
+} from "./delegated";
 import type { EnsuredUserContext } from "./types";
 
 const jwksByTeamDomain = new Map<
@@ -90,9 +93,40 @@ export async function resolveCloudflareAccessContext(
   const userId = typeof payload.sub === "string" ? payload.sub : null;
   const userEmail = typeof payload.email === "string" ? payload.email : null;
 
-  if (!userId || !userEmail) {
+  if (userId && userEmail) {
+    return resolveSharedWorkspaceContext(userId, userEmail);
+  }
+
+  // Access service tokens (CF-Access-Client-Id/-Secret) are verified by Access
+  // like a login, but the JWT carries only `common_name` (the token's client
+  // id). ACCESS_SERVICE_TOKEN_ALIASES maps a client id to the email of the
+  // user the token acts as, so a machine client (Executor) works inside that
+  // user's workspace. Unmapped tokens are rejected even if Access let them in.
+  const commonName =
+    typeof payload.common_name === "string" ? payload.common_name : null;
+  const aliasEmail = commonName
+    ? serviceTokenAliasEmail(env.ACCESS_SERVICE_TOKEN_ALIASES, commonName)
+    : null;
+
+  if (!aliasEmail) {
     throw new AppError("UNAUTHENTICATED");
   }
 
-  return resolveSharedWorkspaceContext(userId, userEmail);
+  return resolveSharedWorkspaceContextByEmail(aliasEmail);
+}
+
+// `<client-id>=<email>,<client-id>=<email>`; the deploy derives it from
+// ACCESS_SERVICE_TOKENS (token ids) so operators never copy client ids.
+export function serviceTokenAliasEmail(
+  aliases: string | undefined,
+  commonName: string,
+): string | null {
+  for (const entry of (aliases ?? "").split(",")) {
+    const separator = entry.indexOf("=");
+    if (separator === -1) continue;
+    const clientId = entry.slice(0, separator).trim();
+    const email = entry.slice(separator + 1).trim();
+    if (clientId && email && clientId === commonName) return email;
+  }
+  return null;
 }
