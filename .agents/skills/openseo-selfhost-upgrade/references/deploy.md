@@ -17,6 +17,7 @@ Rules:
 - Rotating `BETTER_AUTH_SECRET` invalidates stored Google tokens. Users reconnect GSC and GA4 afterwards.
 - Changing `ACCESS_ALLOWED_EMAILS` is the only supported way to change who can sign in. Dashboard edits are overwritten.
 - Changing `DOMAIN` moves the custom-domain route and the Access application together. The old hostname stops serving.
+- `ACCESS_SERVICE_TOKENS` maps token ids to an email that must already have a `user` row (signed in once). A wrong email fails at request time on `/mcp` with `AUTH_CONFIG_MISSING`, not at deploy.
 - Never paste a value into a chat message, log, or commit. `.logs/` is gitignored but still on disk.
 
 ## Migration gate
@@ -49,10 +50,11 @@ Record the SHA deployed and the worker version alchemy prints.
 ## Verify
 
 1. `https://seo.arya.sh/api/health` returns OK through Cloudflare Access (the browser session or a service token; an unauthenticated curl gets the Access login page, which is correct).
-2. The dashboard loads, GSC and GA4 still show connected, and the Chat tab (SAM) answers.
-3. No `AUTH_CONFIG_MISSING` errors in the worker's recent logs. That error means requests reached the worker without an Access JWT, so the Access application or route is wrong.
-4. Both crons are still attached to the `open-seo` worker.
-5. When the release touched audits or rank tracking, trigger one small audit and check that the `open-seo-audit` worker and the site-audit workflow ran.
+2. Through Executor MCP, `tools.openseo_mcp.org.aryaLabs.whoami` returns aryasaatvik@gmail.com in self-hosted mode. This proves the service-token policy, the alias var, and the `/mcp` route together.
+3. The dashboard loads, GSC and GA4 still show connected, and the Chat tab (SAM) answers.
+4. No `AUTH_CONFIG_MISSING` errors in the worker's recent logs. That error means requests reached the worker without an Access JWT, so the Access application or route is wrong.
+5. Both crons are still attached to the `open-seo` worker.
+6. When the release touched audits or rank tracking, trigger one small audit and check that the `open-seo-audit` worker and the site-audit workflow ran.
 
 Use Executor through MCP for worker versions, logs, and Access application readback.
 

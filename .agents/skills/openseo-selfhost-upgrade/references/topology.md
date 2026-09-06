@@ -31,8 +31,10 @@ Current patches, all in the deploy layer:
 | `fix(selfhost): give the selfhost stage unsuffixed resource names` | `alchemy.access.ts`, `alchemy.run.ts` | `stageSuffix(stage)` returns `""` for `hosted-prod` and `selfhost`; every D1/R2/KV/workflow/Access name uses it |
 | `docs(selfhost): add the selfhost upgrade skill` | `.agents/skills/openseo-selfhost-upgrade/**`, `.claude/skills/openseo-selfhost-upgrade`, `knip.jsonc` | This skill; knip excludes skill helper scripts |
 | `fix(selfhost): retain D1, R2, and KV on the selfhost stage` | `alchemy.access.ts`, `alchemy.run.ts` | Exports `SELFHOST_STAGE`; `makeResources` retains the data-bearing resources for `hosted-prod` and `selfhost` |
+| `feat(selfhost): admit Access service tokens as aliased users` | `alchemy.access.ts`, `alchemy.run.ts`, `src/middleware/ensure-user/{cloudflareAccess,delegated}.ts`, `src/env.d.ts`, docs | Reads `ACCESS_SERVICE_TOKENS` (`<token-id>=<email>`), adds a `non_identity` policy to the Access application, derives the `ACCESS_SERVICE_TOKEN_ALIASES` worker var; the Access middleware resolves a `common_name`-only JWT through that map to the existing user |
+| `fix(mcp): return HTTP errors from the self-hosted /mcp auth step` | `src/server/mcp/transport.ts` | Identity failures on `/mcp` return 401/500 with the guidance message instead of an uncaught exception (edge 1101) |
 
-Application code is unpatched. If a future patch has to touch `src/`, add it to this table and to the conflict policy in `rebase.md`.
+The last two patches touch `src/`; the conflict policy in `rebase.md` covers them.
 
 ## Cloudflare resources (Arya Labs account, stage `selfhost`)
 
@@ -45,7 +47,8 @@ Application code is unpatched. If a future patch has to touch `src/`, add it to 
 | R2 | `open-seo-r2` | DataForSEO response cache. Retained on destroy |
 | Workflows | `site-audit-workflow`, `rank-check-workflow` | Names are alchemy resource ids; a rename orphans the live registration |
 | Durable Objects | `ONBOARDING_CHAT`, `SAM_CHAT`, audit scratchpad | SQLite-backed, declared in `wrangler.jsonc` migrations |
-| Access | app `open-seo`, policy `open-seo users` | Zero Trust team `aryalabs.cloudflareaccess.com`, emails from `ACCESS_ALLOWED_EMAILS`. Dashboard edits are overwritten each deploy |
+| Access | app `open-seo`, policies `open-seo users` (allow) and `open-seo users (service tokens)` (Service Auth) | Zero Trust team `aryalabs.cloudflareaccess.com`, emails from `ACCESS_ALLOWED_EMAILS`, token ids from `ACCESS_SERVICE_TOKENS`. Dashboard edits are overwritten each deploy |
+| Access service token | `openseo-executor` (id `38749c3a-97fe-4c02-83c3-68936303d891`, duration forever) | Created via the Cloudflare API, not alchemy. Acts as aryasaatvik@gmail.com. Its secret lives only in Executor's `openseo_mcp` integration headers |
 | State | worker `alchemy-state-store` | Alchemy state, profile `default` |
 
 Alchemy pin: `2.0.0-beta.61` from `package.json`, the upstream package. The patched Samva alchemy build is deliberately not used here.
@@ -59,7 +62,8 @@ Secrets live only in `.env.selfhost` (gitignored, mode 600). Dates and balances 
 | DataForSEO | account saatvik@aryalabs.ai, prepaid, no auto-recharge | `DATAFORSEO_API_KEY` (base64 `email:api-password`). Self-host mode has no spend guardrail; check with `pnpm billing:usage` |
 | OpenRouter | key named `OpenSEO`, personal account | `OPENROUTER_API_KEY`, optional `OPENROUTER_MODEL`. Powers SAM |
 | Google | GCP project `openseo-163576` (aryasaatvik@gmail.com), consent screen External, published to Production and unverified, OAuth web client `OpenSEO` | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`. Callbacks `https://seo.arya.sh/api/gsc/oauth/callback` and `.../api/ga4/oauth/callback`. Any Google account can connect through the unverified-app interstitial; lifetime cap 100 grants. Branding homepage `https://arya.sh`, privacy URL `https://arya.sh/privacy` (no page exists; only needed if verification is ever submitted) |
-| Cloudflare | Arya Labs account, Workers Paid | alchemy profile `default`; Access allowlist `ACCESS_ALLOWED_EMAILS` |
+| Cloudflare | Arya Labs account, Workers Paid | alchemy profile `default`; Access allowlist `ACCESS_ALLOWED_EMAILS`; machine clients `ACCESS_SERVICE_TOKENS` |
+| Executor | `https://executor.arya.sh`, integration `openseo_mcp`, connection `tools.openseo_mcp.org.aryaLabs` | Calls `https://seo.arya.sh/mcp` with `CF-Access-Client-Id` / `CF-Access-Client-Secret` integration headers. Rotate: create a new token, update the headers and `ACCESS_SERVICE_TOKENS`, redeploy, then delete the old token |
 
 ## Read-only refresh
 

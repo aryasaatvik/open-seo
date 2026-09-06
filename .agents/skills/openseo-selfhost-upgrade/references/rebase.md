@@ -31,11 +31,13 @@ Resolve by intent, not by side. The fork's intent is narrow: one paid-plan deplo
 | `url: !customDomain` | Upstream still exposes workers.dev for self-host | The worker's current route or `url` option |
 | Unconditional `limits.cpuMs` | Upstream still gates it on `authMode` | The current `limits` prop. If upstream adds a plan flag, set it instead |
 | Retain on `selfhost` | Upstream still retains only `hosted-prod` | Whatever predicate upstream passes to `RemovalPolicy.retain` in `makeResources`. D1, R2, and KV must stay retained; workers may be deleted |
+| Service-token aliases | Upstream has no machine-client path for `cloudflare_access` | `emailAccessGate` (second policy) and `resolveSelfHostAccess` in alchemy; the `common_name` branch in `resolveCloudflareAccessContext` and `resolveSharedWorkspaceContextByEmail`. If upstream adds its own service-token support, adopt it and migrate `ACCESS_SERVICE_TOKENS` in the same change |
+| `/mcp` error mapping | Upstream still lets identity errors escape `handleSelfHostedOpenSeoMcpRequest` | `responseForAppError` around the identity resolution |
 
 Rules:
 
 - Prefer upstream's current alchemy structure, binding names, and Access provisioning. Port the fork behavior onto it rather than restoring old structure.
-- Take upstream for anything under `src/`, `drizzle/`, `wrangler.jsonc`, docs, and tests. The fork has no application patches.
+- Take upstream for anything under `src/`, `drizzle/`, `wrangler.jsonc`, docs, and tests, except the two application patches above (`src/middleware/ensure-user/*`, `src/server/mcp/transport.ts`) and their test.
 - Never resolve with blanket `ours` or `theirs`.
 - Never hand-edit `pnpm-lock.yaml` conflicts. Take upstream's lockfile and run `pnpm install --frozen-lockfile`; the fork adds no dependencies.
 - Search for leftover markers before building: `rg -n '^(<<<<<<<|=======|>>>>>>>)' --glob '!pnpm-lock.yaml'`.
