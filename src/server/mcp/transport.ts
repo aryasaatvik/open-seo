@@ -11,6 +11,8 @@ import { getHostedBaseUrl } from "@/lib/auth";
 import { MCP_SCOPE } from "@/lib/oauth-resource";
 import { resolveCloudflareAccessContext } from "@/middleware/ensure-user/cloudflareAccess";
 import { resolveLocalNoAuthContext } from "@/middleware/ensure-user/delegated";
+import type { EnsuredUserContext } from "@/middleware/ensure-user/types";
+import { responseForAppError } from "@/server/lib/http-errors";
 import {
   createWorkersOAuthMcpProps,
   hostedWorkersOAuthMcpPropsSchema,
@@ -219,10 +221,18 @@ export async function handleSelfHostedOpenSeoMcpRequest(
     return new Response(null, { headers: MCP_CORS_HEADERS });
   }
 
-  const identity =
-    authMode === "local_noauth"
-      ? await resolveLocalNoAuthContext()
-      : await resolveCloudflareAccessContext(request.headers);
+  // Identity failures (no Access JWT, unmapped service token, missing user)
+  // are AppErrors; surface them as their HTTP status rather than an uncaught
+  // exception, which the edge reports as a bare Cloudflare 1101.
+  let identity: EnsuredUserContext;
+  try {
+    identity =
+      authMode === "local_noauth"
+        ? await resolveLocalNoAuthContext()
+        : await resolveCloudflareAccessContext(request.headers);
+  } catch (error) {
+    return responseForAppError(error, "MCP authentication failed");
+  }
   const props = createWorkersOAuthMcpProps({
     userId: identity.userId,
     userEmail: identity.userEmail,
