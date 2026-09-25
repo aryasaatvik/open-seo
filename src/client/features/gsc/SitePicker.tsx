@@ -1,23 +1,10 @@
 import { GoogleGlyph } from "@/client/features/gsc/GoogleGlyph";
-import { startGoogleLink } from "@/client/features/integrations/startGoogleLink";
 
 type SiteOption = {
   siteUrl: string;
   permissionLevel: string;
   selectable: boolean;
   isSelected: boolean;
-};
-
-type AccountOption = {
-  accountId: string;
-  email: string | null;
-  requiresReconnect: boolean;
-  sites: SiteOption[];
-};
-
-export type GscSiteSelection = {
-  accountId: string;
-  siteUrl: string;
 };
 
 type SecondaryAction = {
@@ -28,14 +15,16 @@ type SecondaryAction = {
 };
 
 /**
- * Verified-property selector for connected Google accounts. Shared by the
+ * Verified-property selector for the connected Google account. Shared by the
  * Integrations card and the onboarding step. `secondaryAction` is optional —
  * omit it where there's nothing to cancel/disconnect (e.g. onboarding).
  */
 export function SitePicker({
   loading,
   error,
-  accounts,
+  requiresReconnect,
+  email,
+  sites,
   selection,
   onSelect,
   onSave,
@@ -46,9 +35,11 @@ export function SitePicker({
 }: {
   loading: boolean;
   error: boolean;
-  accounts: AccountOption[];
-  selection: GscSiteSelection | null;
-  onSelect: (selection: GscSiteSelection) => void;
+  requiresReconnect: boolean;
+  email: string | null;
+  sites: SiteOption[];
+  selection: string | null;
+  onSelect: (siteUrl: string) => void;
   onSave: () => void;
   saving: boolean;
   onRetry: () => void;
@@ -80,10 +71,7 @@ export function SitePicker({
     );
   }
 
-  const allAccountsRequireReconnect =
-    accounts.length > 0 &&
-    accounts.every((account) => account.requiresReconnect);
-  if (allAccountsRequireReconnect) {
+  if (requiresReconnect) {
     return (
       <div className="space-y-3">
         <p className="text-sm text-error">
@@ -101,23 +89,6 @@ export function SitePicker({
     );
   }
 
-  const healthyAccounts = accounts.filter(
-    (account) => !account.requiresReconnect,
-  );
-  const options = healthyAccounts.flatMap((account) =>
-    account.sites.map((site) => ({
-      accountId: account.accountId,
-      siteUrl: site.siteUrl,
-    })),
-  );
-  const selectedIndex = selection
-    ? options.findIndex(
-        (option) =>
-          option.accountId === selection.accountId &&
-          option.siteUrl === selection.siteUrl,
-      )
-    : -1;
-
   return (
     <div className="space-y-4">
       <label className="block">
@@ -126,43 +97,28 @@ export function SitePicker({
         </span>
         <select
           className="select select-bordered w-full max-w-md"
-          value={selectedIndex >= 0 ? String(selectedIndex) : ""}
-          onChange={(event) => {
-            const option = options[Number(event.target.value)];
-            if (option) onSelect(option);
-          }}
+          value={selection ?? ""}
+          onChange={(event) => onSelect(event.target.value)}
         >
           <option value="" disabled>
             Select a property…
           </option>
-          {healthyAccounts.map((account) => (
-            <optgroup
-              key={account.accountId}
-              label={account.email ?? "Google account"}
-            >
-              {account.sites.length === 0 ? (
-                <option disabled>No properties</option>
-              ) : (
-                account.sites.map((site) => {
-                  const index = options.findIndex(
-                    (option) =>
-                      option.accountId === account.accountId &&
-                      option.siteUrl === site.siteUrl,
-                  );
-                  return (
-                    <option
-                      key={site.siteUrl}
-                      value={index}
-                      disabled={!site.selectable}
-                    >
-                      {site.siteUrl}
-                      {site.selectable ? "" : "  (no access)"}
-                    </option>
-                  );
-                })
-              )}
-            </optgroup>
-          ))}
+          <optgroup label={email ?? "Google account"}>
+            {sites.length === 0 ? (
+              <option disabled>No properties</option>
+            ) : (
+              sites.map((site) => (
+                <option
+                  key={site.siteUrl}
+                  value={site.siteUrl}
+                  disabled={!site.selectable}
+                >
+                  {site.siteUrl}
+                  {site.selectable ? "" : "  (no access)"}
+                </option>
+              ))
+            )}
+          </optgroup>
         </select>
       </label>
       <div className="flex flex-wrap items-center gap-1">
@@ -170,16 +126,16 @@ export function SitePicker({
           type="button"
           className="btn btn-primary btn-sm"
           onClick={onSave}
-          disabled={selectedIndex < 0 || saving}
+          disabled={!selection || saving}
         >
           {saving ? "Saving…" : "Save property"}
         </button>
         <button
           type="button"
           className="btn btn-ghost btn-sm"
-          onClick={() => void startGoogleLink("gsc", window.location.href)}
+          onClick={onReconnect}
         >
-          Connect another Google account
+          Use a different Google account
         </button>
         {secondaryAction ? (
           <button

@@ -1,8 +1,5 @@
 import { AUTH_MODES } from "@/lib/auth-mode";
-import {
-  MIN_BETTER_AUTH_SECRET_LENGTH,
-  validateTeamDomain,
-} from "@/shared/selfhost-checks";
+import { validateTeamDomain } from "@/shared/selfhost-checks";
 
 // Startup preflight for self-host containers: validate the environment BEFORE
 // the multi-minute build/boot so misconfiguration fails in seconds with the
@@ -13,7 +10,7 @@ type PreflightLevel = "ok" | "info" | "warn" | "fail";
 
 type PreflightItem = {
   // Stable identifier shared with /api/health's check map.
-  key: "auth" | "gsc" | "ai" | "runtime";
+  key: "auth" | "ai" | "runtime";
   name: string;
   level: PreflightLevel;
   message: string;
@@ -120,47 +117,6 @@ function checkAuthMode(env: EnvRecord, items: PreflightItem[]): void {
 }
 
 function checkOptionalFeatures(env: EnvRecord, items: PreflightItem[]): void {
-  const clientId = get(env, "GOOGLE_CLIENT_ID");
-  const clientSecret = get(env, "GOOGLE_CLIENT_SECRET");
-  const betterAuthSecret = get(env, "BETTER_AUTH_SECRET");
-
-  if (clientId || clientSecret) {
-    if (!clientId || !clientSecret) {
-      items.push({
-        key: "gsc",
-        name: "Search Console",
-        level: "warn",
-        message:
-          "Only one of GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET is set — both are required.",
-      });
-    } else if (
-      !betterAuthSecret ||
-      betterAuthSecret.length < MIN_BETTER_AUTH_SECRET_LENGTH
-    ) {
-      items.push({
-        key: "gsc",
-        name: "Search Console",
-        level: "warn",
-        message: `Google credentials are set, but Search Console stays DISABLED until BETTER_AUTH_SECRET is at least ${MIN_BETTER_AUTH_SECRET_LENGTH} characters (it encrypts stored OAuth tokens).`,
-      });
-    } else {
-      items.push({
-        key: "gsc",
-        name: "Search Console",
-        level: "ok",
-        message: "Configured",
-      });
-    }
-  } else {
-    items.push({
-      key: "gsc",
-      name: "Search Console",
-      level: "info",
-      message:
-        "Not configured (optional). See docs/SELF_HOSTING_GOOGLE_SEARCH_CONSOLE.md.",
-    });
-  }
-
   items.push(
     get(env, "OPENROUTER_API_KEY")
       ? {

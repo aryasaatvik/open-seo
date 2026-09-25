@@ -43,7 +43,7 @@ export function dataforseoToolName(path: string): string {
     .join(".");
 }
 
-function toolAddress(
+export function toolAddress(
   integration: string,
   tool: string,
   connectionName = CONNECTION_NAME,

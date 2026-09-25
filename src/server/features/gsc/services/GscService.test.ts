@@ -1,152 +1,58 @@
-/* eslint-disable max-lines */
-import type { SQL } from "drizzle-orm";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GscApiError, GscTokenError } from "@/server/lib/gscErrors";
 import { GscService } from "./GscService";
 
-const mocks = vi.hoisted(() => {
-  const state: { selectRows: Array<{ id: string; accountId: string }> } = {
-    selectRows: [],
-  };
-  type GscClientOptions = { userId: string; gscAccountId?: string };
-  type GscSite = { siteUrl: string; permissionLevel: string };
-  const listSites = vi.fn<(opts: GscClientOptions) => Promise<GscSite[]>>();
-  const getUserInfoEmail =
-    vi.fn<(opts: GscClientOptions) => Promise<string | null>>();
-  const querySearchAnalytics =
-    vi.fn<(opts: GscClientOptions) => Promise<never[]>>();
-  const deleteWhere = vi
-    .fn<(condition: SQL) => Promise<void>>()
-    .mockResolvedValue(undefined);
-  const dbSelect = vi.fn(() => ({
-    from: vi.fn(() => ({
-      where: vi.fn(() => {
-        const rows = state.selectRows;
-        return Object.assign(Promise.resolve(rows), {
-          limit: vi.fn().mockResolvedValue(rows),
-        });
-      }),
-    })),
-  }));
-
-  return {
-    state,
-    dbSelect,
-    deleteWhere,
-    dbDelete: vi.fn(() => ({ where: deleteWhere })),
-    listSites,
-    getUserInfoEmail,
-    querySearchAnalytics,
-    createGscClient: vi.fn((opts: GscClientOptions) => ({
-      listSites: () => listSites(opts),
-      getUserInfoEmail: () => getUserInfoEmail(opts),
-      querySearchAnalytics: () => querySearchAnalytics(opts),
-    })),
-    upsert: vi.fn(),
-    getByProjectId: vi.fn(),
-    deleteByProjectId: vi.fn(),
-    existsForConnectorAccount: vi.fn(),
-  };
-});
+const mocks = vi.hoisted(() => ({
+  listSites: vi.fn(),
+  querySearchAnalytics: vi.fn(),
+  googleConnectionStatus: vi.fn(),
+  upsert: vi.fn(),
+  getByProjectId: vi.fn(),
+  deleteByProjectId: vi.fn(),
+}));
 
 vi.mock("cloudflare:workers", () => ({ env: {} }));
-vi.mock("@/db", () => ({
-  db: { select: mocks.dbSelect, delete: mocks.dbDelete },
-}));
 vi.mock("@/server/lib/gscClient", () => ({
-  createGscClient: mocks.createGscClient,
+  createGscClient: () => ({
+    listSites: mocks.listSites,
+    querySearchAnalytics: mocks.querySearchAnalytics,
+  }),
+}));
+vi.mock("@/server/lib/executor/google", () => ({
+  googleConnectionStatus: mocks.googleConnectionStatus,
+  GoogleNotConnectedError: class extends Error {},
 }));
 vi.mock("@/server/features/gsc/repositories/GscConnectionRepository", () => ({
   GscConnectionRepository: {
     upsert: mocks.upsert,
     getByProjectId: mocks.getByProjectId,
     deleteByProjectId: mocks.deleteByProjectId,
-    existsForConnectorAccount: mocks.existsForConnectorAccount,
   },
 }));
 
-const baseInput = {
-  projectId: "p1",
-  organizationId: "org1",
-  accountId: "sub-a",
-  userId: "u1",
-};
+const baseInput = { projectId: "p1", organizationId: "org1" };
 
-function collectSqlParams(value: unknown): unknown[] {
-  if (!value || typeof value !== "object") return [];
-  if ("value" in value && "encoder" in value) {
-    return [value.value];
-  }
-  if (!("queryChunks" in value) || !Array.isArray(value.queryChunks)) return [];
-  return value.queryChunks.flatMap(collectSqlParams);
-}
-
-describe("GscService.setSite", () => {
+describe("GscService", () => {
   beforeEach(() => {
-    mocks.state.selectRows = [{ id: "grant-a", accountId: "sub-a" }];
-    mocks.listSites.mockReset();
-    mocks.getUserInfoEmail.mockReset();
-    mocks.createGscClient.mockClear();
-    mocks.upsert.mockReset();
+    mocks.googleConnectionStatus.mockResolvedValue({
+      connected: true,
+      email: "owner@example.com",
+    });
+    mocks.upsert.mockResolvedValue({ siteUrl: "https://x/" });
   });
 
-  it("upserts a verified property with the selected grant and userinfo email", async () => {
+  it("binds a verified property without touching the grant", async () => {
     mocks.listSites.mockResolvedValue([
       { siteUrl: "https://x/", permissionLevel: "siteOwner" },
     ]);
-    mocks.getUserInfoEmail.mockResolvedValue("client@example.com");
-    mocks.upsert.mockResolvedValue({ siteUrl: "https://x/" });
 
     await GscService.setSite({ ...baseInput, siteUrl: "https://x/" });
 
-    expect(mocks.createGscClient).toHaveBeenCalledWith({
-      userId: "u1",
-      gscAccountId: "sub-a",
-    });
-    expect(mocks.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        projectId: "p1",
-        siteUrl: "https://x/",
-        connectedByUserId: "u1",
-        gscAccountId: "sub-a",
-        connectedAccountEmail: "client@example.com",
-      }),
-    );
-  });
-
-  it("re-saves with a null email when userinfo is unavailable", async () => {
-    mocks.listSites.mockResolvedValue([
-      { siteUrl: "https://x/", permissionLevel: "siteOwner" },
-    ]);
-    mocks.getUserInfoEmail.mockRejectedValue(new Error("userinfo unavailable"));
-    mocks.upsert.mockResolvedValue({
-      siteUrl: "https://x/",
-      connectedAccountEmail: "previous@example.com",
-    });
-
-    const result = await GscService.setSite({
-      ...baseInput,
+    expect(mocks.upsert).toHaveBeenCalledWith({
+      projectId: "p1",
+      organizationId: "org1",
       siteUrl: "https://x/",
     });
-
-    expect(mocks.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ connectedAccountEmail: null }),
-    );
-    expect(result).toMatchObject({
-      connectedAccountEmail: "previous@example.com",
-    });
-  });
-
-  it("rejects a Google sub that is not one of the caller's grants", async () => {
-    await expect(
-      GscService.setSite({
-        ...baseInput,
-        accountId: "foreign-sub",
-        siteUrl: "https://x/",
-      }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(mocks.createGscClient).not.toHaveBeenCalled();
-    expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects an unverified property with FORBIDDEN", async () => {
@@ -160,273 +66,55 @@ describe("GscService.setSite", () => {
     expect(mocks.upsert).not.toHaveBeenCalled();
   });
 
-  it("rejects a property not on the selected grant with NOT_FOUND", async () => {
-    mocks.listSites.mockResolvedValue([
-      { siteUrl: "https://x/", permissionLevel: "siteOwner" },
-    ]);
+  it("reports a dead grant as a reconnect instead of failing the list", async () => {
+    mocks.listSites.mockRejectedValue(new GscTokenError("revoked"));
 
-    await expect(
-      GscService.setSite({ ...baseInput, siteUrl: "https://not-mine/" }),
-    ).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(mocks.upsert).not.toHaveBeenCalled();
-  });
-});
-
-describe("GscService.listSitesForUserWithGrantStatus", () => {
-  beforeEach(() => {
-    mocks.state.selectRows = [
-      { id: "grant-a", accountId: "sub-a" },
-      { id: "grant-b", accountId: "sub-b" },
-    ];
-    mocks.listSites.mockReset();
-    mocks.getUserInfoEmail.mockReset();
-    mocks.createGscClient.mockClear();
-    mocks.dbDelete.mockClear();
-  });
-
-  it("lists grants independently and never deletes a dead grant", async () => {
-    mocks.getUserInfoEmail.mockImplementation(
-      async ({ gscAccountId }: { gscAccountId?: string }) =>
-        `${gscAccountId}@example.com`,
-    );
-    mocks.listSites.mockImplementation(
-      async ({ gscAccountId }: { gscAccountId?: string }) => {
-        if (gscAccountId === "sub-b") throw new GscTokenError("revoked");
-        return [{ siteUrl: "https://x/", permissionLevel: "siteOwner" }];
-      },
-    );
-
-    await expect(
-      GscService.listSitesForUserWithGrantStatus("u1"),
-    ).resolves.toEqual({
-      accounts: [
-        {
-          accountId: "sub-a",
-          email: "sub-a@example.com",
-          requiresReconnect: false,
-          sites: [{ siteUrl: "https://x/", permissionLevel: "siteOwner" }],
-        },
-        {
-          accountId: "sub-b",
-          email: null,
-          requiresReconnect: true,
-          sites: [],
-        },
-      ],
+    await expect(GscService.listSites(baseInput)).resolves.toEqual({
+      requiresReconnect: true,
+      sitesUnavailable: false,
+      email: "owner@example.com",
+      sites: [],
     });
-    expect(mocks.createGscClient).toHaveBeenCalledTimes(2);
-    expect(mocks.getUserInfoEmail).not.toHaveBeenCalledWith(
-      expect.objectContaining({ gscAccountId: "sub-b" }),
+    expect(mocks.googleConnectionStatus).toHaveBeenCalledWith(
+      "org1",
+      "google_search_console",
     );
-    expect(mocks.dbDelete).not.toHaveBeenCalled();
   });
 
-  it("keeps userinfo failures non-fatal", async () => {
-    mocks.state.selectRows = [{ id: "grant-a", accountId: "sub-a" }];
-    mocks.getUserInfoEmail.mockRejectedValue(new Error("userinfo unavailable"));
-    mocks.listSites.mockResolvedValue([
-      { siteUrl: "https://x/", permissionLevel: "siteOwner" },
-    ]);
-
-    await expect(
-      GscService.listSitesForUserWithGrantStatus("u1"),
-    ).resolves.toEqual({
-      accounts: [
-        {
-          accountId: "sub-a",
-          email: null,
-          requiresReconnect: false,
-          sites: [{ siteUrl: "https://x/", permissionLevel: "siteOwner" }],
-        },
-      ],
-    });
-  });
-
-  it("marks a grant for reconnect on a GSC 403 without deleting it", async () => {
-    mocks.state.selectRows = [{ id: "grant-a", accountId: "sub-a" }];
-    mocks.getUserInfoEmail.mockResolvedValue("a@example.com");
-    mocks.listSites.mockRejectedValue(
-      new GscApiError(403, "Search Console denied access"),
-    );
-
-    await expect(
-      GscService.listSitesForUserWithGrantStatus("u1"),
-    ).resolves.toEqual({
-      accounts: [
-        {
-          accountId: "sub-a",
-          email: null,
-          requiresReconnect: true,
-          sites: [],
-        },
-      ],
-    });
-    expect(mocks.getUserInfoEmail).not.toHaveBeenCalled();
-    expect(mocks.dbDelete).not.toHaveBeenCalled();
-  });
-
-  it("keeps non-auth GSC API errors reportable", async () => {
-    mocks.getUserInfoEmail.mockImplementation(
-      async ({ gscAccountId }: { gscAccountId?: string }) =>
-        `${gscAccountId}@example.com`,
-    );
+  it("reports a non-auth API error as a retry, not a reconnect", async () => {
     const rateLimit = new GscApiError(429, "slow down");
-    mocks.listSites.mockImplementation(
-      async ({ gscAccountId }: { gscAccountId?: string }) => {
-        if (gscAccountId === "sub-b") throw rateLimit;
-        return [{ siteUrl: "https://x/", permissionLevel: "siteOwner" }];
-      },
-    );
+    mocks.listSites.mockRejectedValue(rateLimit);
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);
 
-    await expect(
-      GscService.listSitesForUserWithGrantStatus("u1"),
-    ).resolves.toEqual({
-      accounts: [
-        {
-          accountId: "sub-a",
-          email: "sub-a@example.com",
-          requiresReconnect: false,
-          sites: [{ siteUrl: "https://x/", permissionLevel: "siteOwner" }],
-        },
-        {
-          accountId: "sub-b",
-          email: null,
-          requiresReconnect: true,
-          sites: [],
-        },
-      ],
+    await expect(GscService.listSites(baseInput)).resolves.toMatchObject({
+      requiresReconnect: false,
+      sitesUnavailable: true,
     });
     expect(consoleError).toHaveBeenCalledWith(
-      "Failed to list Search Console sites for account",
-      "sub-b",
+      "Failed to list Search Console sites",
       rateLimit,
     );
-    expect(mocks.dbDelete).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });
-});
 
-describe("GscService.getPerformance", () => {
-  beforeEach(() => {
-    mocks.getByProjectId.mockReset();
-    mocks.querySearchAnalytics.mockReset().mockResolvedValue([]);
-    mocks.createGscClient.mockClear();
-  });
-
-  it("uses the grant stored on the project connection", async () => {
+  it("labels performance results with the connected Google account", async () => {
     mocks.getByProjectId.mockResolvedValue({
-      connectedByUserId: "u1",
-      connectedAccountEmail: "a@example.com",
-      gscAccountId: "sub-a",
       siteUrl: "https://x/",
+      organizationId: "org1",
     });
+    mocks.querySearchAnalytics.mockResolvedValue([]);
 
-    await GscService.getPerformance({
-      projectId: "p1",
-      startDate: "2026-01-01",
-      endDate: "2026-01-31",
-    });
-
-    expect(mocks.createGscClient).toHaveBeenCalledWith({
-      userId: "u1",
-      gscAccountId: "sub-a",
-    });
-  });
-
-  it("passes undefined for the legacy null-account fallback", async () => {
-    mocks.getByProjectId.mockResolvedValue({
-      connectedByUserId: "u1",
-      connectedAccountEmail: null,
-      gscAccountId: null,
+    await expect(
+      GscService.getPerformance({
+        projectId: "p1",
+        startDate: "2026-01-01",
+        endDate: "2026-01-31",
+      }),
+    ).resolves.toMatchObject({
       siteUrl: "https://x/",
+      connectedBy: "owner@example.com",
     });
-
-    await GscService.getPerformance({
-      projectId: "p1",
-      startDate: "2026-01-01",
-      endDate: "2026-01-31",
-    });
-
-    expect(mocks.createGscClient).toHaveBeenCalledWith({
-      userId: "u1",
-      gscAccountId: undefined,
-    });
-  });
-});
-
-describe("GscService.disconnect", () => {
-  beforeEach(() => {
-    mocks.getByProjectId.mockReset();
-    mocks.deleteByProjectId.mockReset().mockResolvedValue(undefined);
-    mocks.existsForConnectorAccount.mockReset();
-    mocks.dbDelete.mockClear();
-    mocks.deleteWhere.mockClear();
-  });
-
-  it("unlinks only the disconnected account when it is no longer used", async () => {
-    mocks.getByProjectId.mockResolvedValue({
-      connectedByUserId: "u1",
-      gscAccountId: "sub-b",
-    });
-    mocks.existsForConnectorAccount.mockResolvedValue(false);
-
-    await GscService.disconnect({ projectId: "p1", userId: "u1" });
-
-    expect(mocks.deleteByProjectId).toHaveBeenCalledWith("p1");
-    expect(mocks.existsForConnectorAccount).toHaveBeenCalledWith("u1", "sub-b");
-    expect(mocks.dbDelete).toHaveBeenCalledTimes(1);
-    const whereCondition = mocks.deleteWhere.mock.calls[0]?.[0];
-    expect(collectSqlParams(whereCondition)).toEqual(
-      expect.arrayContaining(["u1", "google-search-console", "sub-b"]),
-    );
-  });
-
-  it("keeps the grant when the same account powers another project", async () => {
-    mocks.getByProjectId.mockResolvedValue({
-      connectedByUserId: "u1",
-      gscAccountId: "sub-b",
-    });
-    mocks.existsForConnectorAccount.mockResolvedValue(true);
-
-    await GscService.disconnect({ projectId: "p1", userId: "u1" });
-
-    expect(mocks.dbDelete).not.toHaveBeenCalled();
-  });
-
-  it("never revokes a grant when another member disconnects", async () => {
-    mocks.getByProjectId.mockResolvedValue({
-      connectedByUserId: "owner",
-      gscAccountId: "sub-b",
-    });
-
-    await GscService.disconnect({ projectId: "p1", userId: "other-member" });
-
-    expect(mocks.existsForConnectorAccount).not.toHaveBeenCalled();
-    expect(mocks.dbDelete).not.toHaveBeenCalled();
-  });
-
-  it("deletes no grants for a legacy null-account connection", async () => {
-    mocks.getByProjectId.mockResolvedValue({
-      connectedByUserId: "u1",
-      gscAccountId: null,
-    });
-
-    await GscService.disconnect({ projectId: "p1", userId: "u1" });
-
-    expect(mocks.deleteByProjectId).toHaveBeenCalledWith("p1");
-    expect(mocks.existsForConnectorAccount).not.toHaveBeenCalled();
-    expect(mocks.dbDelete).not.toHaveBeenCalled();
-  });
-
-  it("deletes no grants when no property was bound", async () => {
-    mocks.getByProjectId.mockResolvedValue(null);
-
-    await GscService.disconnect({ projectId: "p1", userId: "u1" });
-
-    expect(mocks.existsForConnectorAccount).not.toHaveBeenCalled();
-    expect(mocks.dbDelete).not.toHaveBeenCalled();
   });
 });

@@ -7,8 +7,6 @@ import { withMcpProjectAuth } from "@/server/mcp/project-auth";
 import { formatMcpTable, type McpTableColumn } from "@/server/mcp/table";
 import { projectIdSchema } from "@/server/mcp/schemas";
 import { buildDashboardUrl } from "@/server/mcp/urls";
-import { hasSelfHostedGoogleOAuthConfig } from "@/server/features/google/oauth-config";
-import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 import { GscService } from "@/server/features/gsc/services/GscService";
 import {
   GSC_DATE_RANGES,
@@ -24,7 +22,6 @@ import {
   GscNotConnectedError,
   GscTokenError,
 } from "@/server/lib/gscErrors";
-import { GSC_SELF_HOSTED_SETUP_DOCS_URL } from "@/shared/gsc";
 
 const TEXT_SUMMARY_ROWS = 15;
 
@@ -64,27 +61,26 @@ function connectGscUrl(baseUrl: string, projectId: string): string {
   return buildDashboardUrl(baseUrl, `/p/${projectId}/search-performance`);
 }
 
-/** Self-hosted GSC requires the operator to provide a Google OAuth client and
- *  BETTER_AUTH_SECRET. Hosted mode always has both; self-hosted tools return this
- *  setup nudge before attempting a token lookup when either is missing. */
-async function missingSelfHostedGoogleClientResponse(
+/** The Google grant lives in the integration gateway. Without one there is
+ *  nothing to query, so the tools return this connect nudge before touching a
+ *  project's property binding. */
+async function missingGoogleConnectionResponse(
   context: ProjectAuthContext,
   projectId: string,
 ) {
-  const [hosted, configured] = await Promise.all([
-    isHostedServerAuthMode(),
-    hasSelfHostedGoogleOAuthConfig(),
-  ]);
-  if (hosted || configured) return null;
+  const google = await GscService.getGoogleConnection({
+    organizationId: context.auth.organizationId,
+  });
+  if (google.connected) return null;
 
   return mcpResponse({
-    text: `This self-hosted OpenSEO deployment is not configured for Search Console yet. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and BETTER_AUTH_SECRET, then reconnect Search Console from the project's settings page. Setup docs: ${GSC_SELF_HOSTED_SETUP_DOCS_URL}`,
+    text: `Google is not connected to this OpenSEO deployment yet. Connect Google Search Console from the project's settings page: ${connectGscUrl(context.baseUrl, projectId)}`,
     meta: buildProjectMeta(context, projectId),
     structuredContent: {
       ok: false,
       connected: false,
-      reason: "gsc_oauth_not_configured",
-      setupDocsUrl: GSC_SELF_HOSTED_SETUP_DOCS_URL,
+      reason: "google_not_connected",
+      connectUrl: connectGscUrl(context.baseUrl, projectId),
     },
   });
 }
@@ -222,7 +218,7 @@ export const getSearchConsolePerformanceTool = {
     },
   },
   handler: withMcpProjectAuth(async (args: PerfArgs, context) => {
-    const blocked = await missingSelfHostedGoogleClientResponse(
+    const blocked = await missingGoogleConnectionResponse(
       context,
       args.projectId,
     );
@@ -358,7 +354,7 @@ export const inspectUrlsTool = {
     },
   },
   handler: withMcpProjectAuth(async (args: InspectArgs, context) => {
-    const blocked = await missingSelfHostedGoogleClientResponse(
+    const blocked = await missingGoogleConnectionResponse(
       context,
       args.projectId,
     );

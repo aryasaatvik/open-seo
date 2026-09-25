@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
 import { waitUntil } from "cloudflare:workers";
 import { z } from "zod";
 import { shiftGa4Date } from "@/server/features/ga4/services/Ga4Dates";
@@ -7,49 +6,32 @@ import { Ga4OrganicOverviewService } from "@/server/features/ga4/services/Ga4Org
 import { Ga4Service } from "@/server/features/ga4/services/Ga4Service";
 import { AppError } from "@/server/lib/errors";
 import { Ga4ReportError } from "@/server/lib/ga4Errors";
-import { hasSelfHostedGoogleOAuthConfig } from "@/server/features/google/oauth-config";
-import {
-  createSelfHostedGoogleAuthorizationUrl,
-  GA4_INTEGRATION,
-} from "@/server/features/google/selfHostedOAuth";
 import { requireOrgPermission } from "@/server/auth/org-gate";
-import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 import { captureServerEvent } from "@/server/lib/posthog";
-import { getPublicOrigin } from "@/server/mcp/public-origin";
-import {
-  requireAuthenticatedContext,
-  requireProjectContext,
-} from "@/serverFunctions/middleware";
+import { requireProjectContext } from "@/serverFunctions/middleware";
 
 const projectScopedSchema = z.object({ projectId: z.string().min(1) });
 const setPropertySchema = projectScopedSchema.extend({
-  accountId: z.string().min(1),
   propertyId: z.string().regex(/^properties\/\d+$/),
-});
-const startSelfHostedLinkSchema = z.object({
-  callbackURL: z.string().min(1),
 });
 
 export const getGa4Connection = createServerFn({ method: "POST" })
   .middleware(requireProjectContext)
   .validator(projectScopedSchema)
   .handler(async ({ context }) => {
-    const [connection, currentUserHasGrant, hosted, ga4Configured] =
-      await Promise.all([
-        Ga4Service.getConnection(context.projectId),
-        Ga4Service.userHasGrant(context.userId),
-        isHostedServerAuthMode(),
-        hasSelfHostedGoogleOAuthConfig(),
-      ]);
+    const [connection, google] = await Promise.all([
+      Ga4Service.getConnection(context.projectId),
+      Ga4Service.getGoogleConnection(context),
+    ]);
     return {
       connected: Boolean(connection),
-      currentUserHasGrant,
-      googleOAuthConfigured: hosted || ga4Configured,
+      // Both Analytics grants exist in the gateway; a property may still need picking.
+      googleConnected: google.connected,
       propertyId: connection?.propertyId ?? null,
       propertyDisplayName: connection?.propertyDisplayName ?? null,
       propertyTimeZone: connection?.propertyTimeZone ?? null,
       propertyCurrencyCode: connection?.propertyCurrencyCode ?? null,
-      connectedByEmail: connection?.connectedAccountEmail ?? null,
+      connectedByEmail: google.email,
       connectedAt: connection?.createdAt ?? null,
     };
   });
@@ -143,18 +125,16 @@ export const listGa4Properties = createServerFn({ method: "POST" })
   .validator(projectScopedSchema)
   .handler(async ({ context }) => {
     const [propertyList, connection] = await Promise.all([
-      Ga4Service.listPropertiesForUserWithGrantStatus(context.userId),
+      Ga4Service.listProperties(context),
       Ga4Service.getConnection(context.projectId),
     ]);
     return {
-      accounts: propertyList.accounts.map((grant) => ({
-        ...grant,
-        properties: grant.properties.map((property) => ({
-          ...property,
-          isSelected:
-            connection?.ga4AccountId === grant.accountId &&
-            connection.propertyId === property.propertyId,
-        })),
+      requiresReconnect: propertyList.requiresReconnect,
+      propertiesUnavailable: propertyList.propertiesUnavailable,
+      email: propertyList.email,
+      properties: propertyList.properties.map((property) => ({
+        ...property,
+        isSelected: connection?.propertyId === property.propertyId,
       })),
     };
   });
@@ -167,9 +147,7 @@ export const setGa4Property = createServerFn({ method: "POST" })
     const connection = await Ga4Service.setProperty({
       projectId: context.projectId,
       organizationId: context.organizationId,
-      accountId: data.accountId,
       propertyId: data.propertyId,
-      userId: context.userId,
     });
     waitUntil(
       captureServerEvent({
@@ -191,10 +169,7 @@ export const disconnectGa4 = createServerFn({ method: "POST" })
   .validator(projectScopedSchema)
   .handler(async ({ context }) => {
     requireOrgPermission(context, { integration: ["manage"] });
-    await Ga4Service.disconnect({
-      projectId: context.projectId,
-      userId: context.userId,
-    });
+    await Ga4Service.disconnect({ projectId: context.projectId });
     waitUntil(
       captureServerEvent({
         distinctId: context.userId,
@@ -205,18 +180,3 @@ export const disconnectGa4 = createServerFn({ method: "POST" })
     );
     return { connected: false as const };
   });
-
-export const startSelfHostedGa4Link = createServerFn({ method: "POST" })
-  .middleware(requireAuthenticatedContext)
-  .validator(startSelfHostedLinkSchema)
-  .handler(async ({ data, context }) => ({
-    url: await createSelfHostedGoogleAuthorizationUrl({
-      integration: GA4_INTEGRATION,
-      user: {
-        userId: context.userId,
-        userEmail: context.userEmail,
-      },
-      callbackURL: data.callbackURL,
-      publicOrigin: getPublicOrigin(getRequest()),
-    }),
-  }));

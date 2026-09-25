@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { ga4Connections } from "@/db/schema";
 
@@ -22,9 +22,6 @@ async function upsert(input: {
   propertyDisplayName: string;
   propertyTimeZone: string;
   propertyCurrencyCode: string;
-  connectedByUserId: string;
-  ga4AccountId: string;
-  connectedAccountEmail: string | null;
 }): Promise<Ga4Connection> {
   const [row] = await db
     .insert(ga4Connections)
@@ -37,14 +34,6 @@ async function upsert(input: {
         propertyDisplayName: input.propertyDisplayName,
         propertyTimeZone: input.propertyTimeZone,
         propertyCurrencyCode: input.propertyCurrencyCode,
-        connectedByUserId: input.connectedByUserId,
-        ga4AccountId: input.ga4AccountId,
-        connectedAccountEmail: sql`case
-          when ${ga4Connections.connectedByUserId} = ${input.connectedByUserId}
-            and ${ga4Connections.ga4AccountId} = ${input.ga4AccountId}
-          then coalesce(${input.connectedAccountEmail}, ${ga4Connections.connectedAccountEmail})
-          else ${input.connectedAccountEmail}
-        end`,
         updatedAt: sql`(current_timestamp)`,
       },
     })
@@ -59,26 +48,8 @@ async function deleteByProjectId(projectId: string): Promise<void> {
     .where(eq(ga4Connections.projectId, projectId));
 }
 
-async function existsForConnectorAccount(
-  userId: string,
-  ga4AccountId: string,
-): Promise<boolean> {
-  const rows = await db
-    .select({ id: ga4Connections.id })
-    .from(ga4Connections)
-    .where(
-      and(
-        eq(ga4Connections.connectedByUserId, userId),
-        eq(ga4Connections.ga4AccountId, ga4AccountId),
-      ),
-    )
-    .limit(1);
-  return rows.length > 0;
-}
-
 export const Ga4ConnectionRepository = {
   getByProjectId,
   upsert,
   deleteByProjectId,
-  existsForConnectorAccount,
 };

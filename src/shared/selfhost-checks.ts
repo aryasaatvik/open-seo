@@ -2,8 +2,6 @@
 // (auth middleware, /api/health, telemetry) and the Docker preflight script,
 // so every surface applies the exact same rules and wording.
 
-export const MIN_BETTER_AUTH_SECRET_LENGTH = 32;
-
 type TeamDomainResult =
   | { ok: true; origin: string }
   | { ok: false; message: string };

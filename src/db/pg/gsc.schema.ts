@@ -6,10 +6,9 @@ import { projects } from "./app.schema";
 // See src/db/pg/app.schema.ts for why timestamps are ISO-8601 UTC text.
 const isoNow = sql`to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 
-// Connected Google Search Console property per project.
-// OAuth tokens live in the better-auth `account` table under providerId
-// "google-search-console"; this row only records which verified property maps
-// to a project and whose grant to use when calling the GSC API.
+// Connected Google Search Console property per project. The Google grant
+// itself lives in the integration gateway (one org-level connection); this row
+// only records which verified property maps to a project.
 export const gscConnections = pgTable(
   "gsc_connections",
   {
@@ -23,10 +22,6 @@ export const gscConnections = pgTable(
     // Stored verbatim from sites.list — "sc-domain:example.com" or
     // "https://example.com/". Never normalize; GSC matches it byte-for-byte.
     siteUrl: text("site_url").notNull(),
-    // Whose google-search-console grant getAccessToken should use.
-    connectedByUserId: text("connected_by_user_id").notNull(),
-    gscAccountId: text("gsc_account_id"),
-    connectedAccountEmail: text("connected_account_email"),
     createdAt: text("created_at").notNull().default(isoNow),
     updatedAt: text("updated_at").notNull().default(isoNow),
   },

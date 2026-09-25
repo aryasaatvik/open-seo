@@ -15,8 +15,8 @@ const PROVIDER_LABELS: Record<GoogleLinkProvider, string> = {
 
 /**
  * Inline error shown on a connect surface after a failed Google link flow.
- * startGoogleLink sends OAuth failures back to the page that started the
- * connect (see its errorCallbackURL); googleLinkError.ts captures the params
+ * The connect callback route sends OAuth failures back to the page that
+ * started the connect; googleLinkError.ts captures the params
  * before the router can redirect them away, and this renders the explanation
  * next to the Connect button that retries it. Persists until dismissed or the
  * user navigates.

@@ -1,6 +1,4 @@
 import { z } from "zod";
-import { GA4_OAUTH_PROVIDER_ID } from "./ga4";
-import { GSC_OAUTH_PROVIDER_ID } from "./gsc";
 
 export const GDPR_STORAGE_ERASURE_PATH = "/api/internal/gdpr-erasure/storage";
 
@@ -18,14 +16,6 @@ export const gdprStorageErasurePayloadSchema = z
     activeAuditWorkflowIds: boundedIds,
     activeRankWorkflowIds: boundedIds,
     r2Keys: boundedIds,
-    googleAccounts: z
-      .array(
-        z.object({
-          providerId: z.enum([GSC_OAUTH_PROVIDER_ID, GA4_OAUTH_PROVIDER_ID]),
-          accountId: z.string().min(1).max(512),
-        }),
-      )
-      .max(MAX_ITEMS_PER_KIND),
   })
   .strict();
 
