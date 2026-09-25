@@ -9,15 +9,11 @@ function itemFor(
 }
 
 describe("runSelfhostPreflight", () => {
-  it("passes the stock Docker setup (local_noauth + DataForSEO key)", () => {
-    const result = runSelfhostPreflight({
-      AUTH_MODE: "local_noauth",
-      DATAFORSEO_API_KEY: btoa("user@example.com:secret"),
-    });
+  it("passes the stock Docker setup (local_noauth)", () => {
+    const result = runSelfhostPreflight({ AUTH_MODE: "local_noauth" });
 
     expect(result.failed).toBe(false);
     expect(itemFor(result, "AUTH_MODE")?.level).toBe("ok");
-    expect(itemFor(result, "DATAFORSEO_API_KEY")?.level).toBe("ok");
   });
 
   it("fails an invalid AUTH_MODE with the valid list", () => {
@@ -47,17 +43,6 @@ describe("runSelfhostPreflight", () => {
 
     expect(result.failed).toBe(true);
     expect(itemFor(result, "TEAM_DOMAIN")?.message).toContain("https://");
-  });
-
-  it("warns on a DataForSEO key that is not base64 login:password", () => {
-    const result = runSelfhostPreflight({
-      AUTH_MODE: "local_noauth",
-      DATAFORSEO_API_KEY: "raw-dashboard-key",
-    });
-
-    expect(result.failed).toBe(false);
-    expect(itemFor(result, "DATAFORSEO_API_KEY")?.level).toBe("warn");
-    expect(itemFor(result, "DATAFORSEO_API_KEY")?.message).toContain("base64");
   });
 
   it("warns that GSC stays disabled on a short BETTER_AUTH_SECRET", () => {

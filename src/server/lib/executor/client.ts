@@ -10,7 +10,7 @@ type ToolHttpMeta = {
   headers: Record<string, string>;
 };
 
-type ToolFailure = {
+export type ToolFailure = {
   code: string;
   message: string;
   status?: number;

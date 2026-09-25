@@ -95,9 +95,9 @@ function fillFromOrigin(iso: string): Promise<SerpLocationResult[]> {
 }
 
 async function fetchFromDataforseo(iso: string): Promise<SerpLocationResult[]> {
-  const response = await dataforseoGet(
-    `/v3/serp/google/locations/${encodeURIComponent(iso)}`,
-  );
+  const response = await dataforseoGet("/v3/serp/google/locations/{country}", {
+    params: { country: iso },
+  });
   const task = assertOk(response);
   return (task.result ?? [])
     .map((item) => locationItemSchema.safeParse(item))

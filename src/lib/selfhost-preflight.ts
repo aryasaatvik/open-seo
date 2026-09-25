@@ -1,6 +1,5 @@
 import { AUTH_MODES } from "@/lib/auth-mode";
 import {
-  looksLikeDataForSeoKey,
   MIN_BETTER_AUTH_SECRET_LENGTH,
   validateTeamDomain,
 } from "@/shared/selfhost-checks";
@@ -14,7 +13,7 @@ type PreflightLevel = "ok" | "info" | "warn" | "fail";
 
 type PreflightItem = {
   // Stable identifier shared with /api/health's check map.
-  key: "auth" | "dataforseo" | "gsc" | "ai" | "runtime";
+  key: "auth" | "gsc" | "ai" | "runtime";
   name: string;
   level: PreflightLevel;
   message: string;
@@ -120,39 +119,6 @@ function checkAuthMode(env: EnvRecord, items: PreflightItem[]): void {
   });
 }
 
-function checkDataForSeo(env: EnvRecord, items: PreflightItem[]): void {
-  const key = get(env, "DATAFORSEO_API_KEY");
-
-  if (!key) {
-    items.push({
-      key: "dataforseo",
-      name: "DATAFORSEO_API_KEY",
-      level: "warn",
-      message:
-        "Not set — all SEO data features will be unavailable until it is. It is the base64 of your DataForSEO login:password (NOT the dashboard API key). See docs/DATAFORSEO_API_KEY.md.",
-    });
-    return;
-  }
-
-  if (!looksLikeDataForSeoKey(key)) {
-    items.push({
-      key: "dataforseo",
-      name: "DATAFORSEO_API_KEY",
-      level: "warn",
-      message:
-        "Set, but does not decode as base64 of login:password. If DataForSEO rejects it, encode your account email and API password: printf 'email:password' | base64.",
-    });
-    return;
-  }
-
-  items.push({
-    key: "dataforseo",
-    name: "DATAFORSEO_API_KEY",
-    level: "ok",
-    message: "Set",
-  });
-}
-
 function checkOptionalFeatures(env: EnvRecord, items: PreflightItem[]): void {
   const clientId = get(env, "GOOGLE_CLIENT_ID");
   const clientSecret = get(env, "GOOGLE_CLIENT_SECRET");
@@ -219,7 +185,6 @@ function checkOptionalFeatures(env: EnvRecord, items: PreflightItem[]): void {
 export function runSelfhostChecks(env: EnvRecord): PreflightItem[] {
   const items: PreflightItem[] = [];
   checkAuthMode(env, items);
-  checkDataForSeo(env, items);
   checkOptionalFeatures(env, items);
   return items;
 }

@@ -1,9 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AppError } from "@/server/lib/errors";
 
-vi.mock("@/server/lib/runtime-env", () => ({
-  getRequiredEnvValue: vi.fn(async () => "test-api-key"),
-}));
+vi.mock("@/server/lib/executor/client", () => ({ invokeTool: vi.fn() }));
 
 const { classifyBacklinksError } = vi.hoisted(() => ({
   classifyBacklinksError: vi.fn(),
@@ -20,6 +18,11 @@ import {
   fetchBacklinksRows,
   fetchBacklinksSummary,
 } from "@/server/lib/dataforseo/backlinks";
+import {
+  envelope,
+  gateway,
+  requestOf,
+} from "@/server/lib/dataforseo/gateway-test-support";
 import { normalizeBacklinksTarget } from "@/server/lib/dataforseoBacklinksTarget";
 
 // A successful DataForSEO task always carries billing metadata (path + cost).
@@ -30,14 +33,11 @@ const billed = {
 };
 
 function okResponse(result: unknown[]) {
-  return new Response(
-    JSON.stringify({
-      status_code: 20000,
-      status_message: "Ok.",
-      tasks: [{ status_code: 20000, status_message: "Ok.", ...billed, result }],
-    }),
-    { status: 200, headers: { "Content-Type": "application/json" } },
-  );
+  return envelope({
+    status_code: 20000,
+    status_message: "Ok.",
+    tasks: [{ status_code: 20000, status_message: "Ok.", ...billed, result }],
+  });
 }
 
 describe("normalizeBacklinksTarget", () => {
@@ -134,25 +134,13 @@ describe("normalizeBacklinksTarget", () => {
 });
 
 describe("fetchBacklinksSummary", () => {
-  beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.clearAllMocks();
-  });
-
   it("classifies top-level DataForSEO body errors using status_code", async () => {
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          status_code: 40200,
-          status_message: "Account balance is too low",
-          tasks: [],
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
+    gateway.mockResolvedValue(
+      envelope({
+        status_code: 40200,
+        status_message: "Account balance is too low",
+        tasks: [],
+      }),
     );
     classifyBacklinksError.mockImplementation((status: number | undefined) => {
       if (status === 40200) {
@@ -176,7 +164,7 @@ describe("fetchBacklinksSummary", () => {
   });
 
   it("treats null summary results as a valid zero-data response", async () => {
-    vi.mocked(fetch).mockResolvedValue(okResponse([null]));
+    gateway.mockResolvedValue(okResponse([null]));
     classifyBacklinksError.mockReturnValue(null);
 
     await expect(
@@ -185,7 +173,7 @@ describe("fetchBacklinksSummary", () => {
   });
 
   it("treats empty summary results as a valid zero-data response", async () => {
-    vi.mocked(fetch).mockResolvedValue(okResponse([]));
+    gateway.mockResolvedValue(okResponse([]));
     classifyBacklinksError.mockReturnValue(null);
 
     await expect(
@@ -194,7 +182,7 @@ describe("fetchBacklinksSummary", () => {
   });
 
   it("asks DataForSEO to exclude subdomains for a domain-scoped target", async () => {
-    vi.mocked(fetch).mockResolvedValue(okResponse([]));
+    gateway.mockResolvedValue(okResponse([]));
     classifyBacklinksError.mockReturnValue(null);
 
     await fetchBacklinksSummary({
@@ -202,17 +190,13 @@ describe("fetchBacklinksSummary", () => {
       includeSubdomains: false,
     });
 
-    const body = vi.mocked(fetch).mock.calls[0]?.[1]?.body;
-    if (typeof body !== "string") {
-      throw new Error("Expected DataForSEO request body to be a string");
-    }
-    expect(JSON.parse(body)).toMatchObject([
+    expect(requestOf().args.body).toMatchObject([
       { target: "example.com", include_subdomains: false },
     ]);
   });
 
   it("treats empty backlinks rows and history results as valid empty arrays", async () => {
-    vi.mocked(fetch)
+    gateway
       .mockResolvedValueOnce(okResponse([]))
       .mockResolvedValueOnce(okResponse([]));
     classifyBacklinksError.mockReturnValue(null);

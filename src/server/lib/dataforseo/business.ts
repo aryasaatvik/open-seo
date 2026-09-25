@@ -273,7 +273,8 @@ export async function fetchBusinessDataTaskResult(input: {
   taskId: string;
 }): Promise<BusinessTaskOutcome> {
   const response = await dataforseoGet(
-    `/v3/business_data/google/${input.endpoint}/task_get/${encodeURIComponent(input.taskId)}`,
+    `/v3/business_data/google/${input.endpoint}/task_get/{id}`,
+    { params: { id: input.taskId } },
   );
 
   const task = response?.tasks?.[0];
