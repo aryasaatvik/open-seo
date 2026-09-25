@@ -1,0 +1,21 @@
+{
+  "name": "@open-seo/integrations-worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Executor SDK embedded as a Cloudflare Worker: the integration gateway the app and audit workers call over a service binding.",
+  "scripts": {
+    "types:check": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@executor-js/fumadb": "1.5.8",
+    "@executor-js/plugin-openapi": "1.6.7",
+    "@executor-js/sdk": "1.6.7",
+    "drizzle-orm": "^0.45.2",
+    "effect": "4.0.0-beta.59"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "typescript": "^5.9.3"
+  }
+}

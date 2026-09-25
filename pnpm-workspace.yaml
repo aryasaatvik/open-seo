@@ -1,6 +1,12 @@
+packages:
+  - "workers/*"
+
 minimumReleaseAge: 11520
 minimumReleaseAgeExclude:
   - "@every-app/*"
+  # Executor SDK releases land on a daily cadence; the integrations worker
+  # pins exact versions, so the age gate adds nothing there.
+  - "@executor-js/*"
   # TEMPORARY (remove after 2026-08-15): workers-oauth-provider 0.10.2 was
   # published 2026-08-07; needed for the MCP SDK v2 migration plus the
   # ChatGPT DCR client-auth-negotiation fix.

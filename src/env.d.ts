@@ -24,6 +24,13 @@ declare namespace Cloudflare {
     // oxlint-disable-next-line typescript-eslint/consistent-type-imports
     AUDIT_ENGINE: Service<typeof import("./audit-worker").default>;
 
+    // Service binding to the integration gateway (workers/integrations):
+    // the embedded Executor that owns every upstream API credential.
+    INTEGRATIONS: Service<
+      // oxlint-disable-next-line typescript-eslint/consistent-type-imports
+      typeof import("../workers/integrations/src/index").default
+    >;
+
     AUTH_MODE?: "cloudflare_access" | "local_noauth" | "hosted";
     BYPASS_EMAIL_VERIFICATION?: string;
     TEAM_DOMAIN?: string;

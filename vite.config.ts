@@ -59,7 +59,13 @@ export default defineConfig(({ mode }) => {
         // beside the main worker in dev and preview, with the app's
         // cross-script SITE_AUDIT_WORKFLOW / AUDIT_SCRATCHPAD bindings
         // resolved against it.
-        auxiliaryWorkers: [{ configPath: "./wrangler.audit.jsonc" }],
+        auxiliaryWorkers: [
+          { configPath: "./wrangler.audit.jsonc" },
+          // The integration gateway (workers/integrations) builds to
+          // dist/open_seo_integrations/; the app's and audit worker's
+          // INTEGRATIONS service bindings resolve against it.
+          { configPath: "./wrangler.integrations.jsonc" },
+        ],
       }),
       tsConfigPaths(),
       tanstackStart(),
