@@ -9,7 +9,7 @@ import {
   stopAnalyticsCapture,
 } from "@/client/lib/posthog";
 import { authClient, useSession } from "@/lib/auth-client";
-import { isHostedClientAuthMode } from "@/lib/auth-mode";
+import { isHostedClientAuthMode, usesBetterAuthClient } from "@/lib/auth-mode";
 import { getActiveOrganizationId } from "@/lib/auth-session";
 import {
   PRIVACY_CHOICES_CHANGED_EVENT,
@@ -100,6 +100,15 @@ export async function updatePrivacyChoices(
 
 /** Starts and stops PostHog to match the current choices. */
 export function PrivacyBootstrap() {
+  // Only Better Auth modes have a session to read. Access, local_noauth and
+  // Every App take identity from outside the app and the server 404s
+  // /api/auth/*, so mounting the session hook there fires a request that can
+  // only fail. The split keeps the hook order stable in the modes that use it.
+  if (!usesBetterAuthClient()) return null;
+  return <PrivacyBootstrapForAccounts />;
+}
+
+function PrivacyBootstrapForAccounts() {
   const { data: session, isPending: isSessionPending } = useSession();
   const choices = usePrivacyChoices();
   const userId = session?.user?.id ?? null;

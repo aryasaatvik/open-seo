@@ -32,6 +32,7 @@ import { signOutAndRedirect, useSession } from "@/lib/auth-client";
 import {
   isEveryAppClientAuthMode,
   isHostedClientAuthMode,
+  usesBetterAuthClient,
 } from "@/lib/auth-mode";
 import { everyAppAccountQueryOptions } from "@/client/features/every-app/everyAppAccountQueries";
 import { BILLING_ROUTE } from "@/shared/billing";
@@ -241,23 +242,60 @@ function EveryAppLink() {
 }
 
 function AccountFooter({ ready }: { ready: boolean }) {
+  return (
+    <UiSidebarFooter className="gap-0 border-t border-sidebar-border pb-safe">
+      <SidebarMenu>
+        <SidebarNavLink
+          icon={CircleHelp}
+          label="Help & Community"
+          linkProps={{ to: "/support" }}
+        />
+        {everyApp ? (
+          <SidebarNavLink
+            icon={Settings}
+            label="Settings"
+            linkProps={{ to: "/settings" }}
+          />
+        ) : usesBetterAuthClient() ? (
+          <BetterAuthAccountRow ready={ready} />
+        ) : (
+          <AccountlessAccountRow ready={ready} />
+        )}
+      </SidebarMenu>
+    </UiSidebarFooter>
+  );
+}
+
+/** Access and local_noauth: identity comes from outside the app, so there is
+ *  no session to read and no account menu — just the settings link. */
+function AccountlessAccountRow({ ready }: { ready: boolean }) {
+  if (!ready) {
+    return (
+      <SidebarMenuItem>
+        <SidebarMenuSkeleton showIcon />
+      </SidebarMenuItem>
+    );
+  }
+  return (
+    <SidebarNavLink
+      icon={Settings}
+      label="Settings"
+      linkProps={{ to: "/settings" }}
+    />
+  );
+}
+
+/** Hosted and password: the signed-in account menu. */
+function BetterAuthAccountRow({ ready }: { ready: boolean }) {
   const { data: session } = useSession();
   const { setOpenMobile } = useSidebar();
-  const everyAppAccountQuery = useQuery({
-    ...everyAppAccountQueryOptions(),
-    enabled: everyApp,
-  });
-  const email = everyApp
-    ? everyAppAccountQuery.data?.email
-    : session?.user?.email;
+  const email = session?.user?.email;
   const [isSwitching, setIsSwitching] = useState(false);
   const orgContextQuery = useQuery({
     ...organizationContextQueryOptions(),
-    enabled: Boolean(email) && !everyApp,
+    enabled: Boolean(email),
   });
-  const organizations = everyApp
-    ? []
-    : (orgContextQuery.data?.organizations ?? []);
+  const organizations = orgContextQuery.data?.organizations ?? [];
   const activeOrganizationId = orgContextQuery.data?.organizationId;
 
   async function handleSwitchOrganization(organizationId: string) {
@@ -275,118 +313,86 @@ function AccountFooter({ ready }: { ready: boolean }) {
     }
   }
 
+  if (!email) return <AccountlessAccountRow ready={ready} />;
+
   return (
-    <UiSidebarFooter className="gap-0 border-t border-sidebar-border pb-safe">
-      <SidebarMenu>
-        <SidebarNavLink
-          icon={CircleHelp}
-          label="Help & Community"
-          linkProps={{ to: "/support" }}
-        />
-        {everyApp ? (
-          <SidebarNavLink
-            icon={Settings}
-            label="Settings"
-            linkProps={{ to: "/settings" }}
-          />
-        ) : email ? (
-          <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <SidebarMenuButton
-                    className={navButtonClass}
-                    aria-label="Open account menu"
-                  />
-                }
-              >
-                <User className="size-4" />
-                <span className="truncate" data-ph-mask>
-                  {email}
-                </span>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" className="w-56">
-                {organizations.length > 1 ? (
-                  <>
-                    <DropdownMenuGroup>
-                      <DropdownMenuLabel className="flex items-center gap-1.5">
-                        <ArrowLeftRight className="size-3" />
-                        Organization
-                      </DropdownMenuLabel>
-                      {organizations.map((organization) => (
-                        <DropdownMenuItem
-                          key={organization.organizationId}
-                          disabled={isSwitching}
-                          onClick={() =>
-                            void handleSwitchOrganization(
-                              organization.organizationId,
-                            )
-                          }
-                        >
-                          <span className="truncate">
-                            {organization.organizationName}
-                          </span>
-                          {organization.organizationId ===
-                          activeOrganizationId ? (
-                            <Check className="ml-auto size-4" />
-                          ) : null}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuGroup>
-                    <DropdownMenuSeparator />
-                  </>
-                ) : null}
-                <DropdownMenuItem
-                  render={
-                    <Link to="/settings" onClick={() => setOpenMobile(false)} />
-                  }
-                >
-                  <Settings className="size-4" />
-                  Settings
-                </DropdownMenuItem>
-                {isHostedClientAuthMode() ? (
+    <SidebarMenuItem>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <SidebarMenuButton
+              className={navButtonClass}
+              aria-label="Open account menu"
+            />
+          }
+        >
+          <User className="size-4" />
+          <span className="truncate" data-ph-mask>
+            {email}
+          </span>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" className="w-56">
+          {organizations.length > 1 ? (
+            <>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="flex items-center gap-1.5">
+                  <ArrowLeftRight className="size-3" />
+                  Organization
+                </DropdownMenuLabel>
+                {organizations.map((organization) => (
                   <DropdownMenuItem
-                    render={
-                      <Link
-                        to={BILLING_ROUTE}
-                        onClick={() => setOpenMobile(false)}
-                      />
+                    key={organization.organizationId}
+                    disabled={isSwitching}
+                    onClick={() =>
+                      void handleSwitchOrganization(organization.organizationId)
                     }
                   >
-                    <CreditCard className="size-4" />
-                    Billing
+                    <span className="truncate">
+                      {organization.organizationName}
+                    </span>
+                    {organization.organizationId === activeOrganizationId ? (
+                      <Check className="ml-auto size-4" />
+                    ) : null}
                   </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>Theme</DropdownMenuLabel>
-                  <div className="px-1 pb-1">
-                    <ThemePreferenceRadio />
-                  </div>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => signOutAndRedirect()}
-                >
-                  <LogOut className="size-4" />
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-        ) : ready ? (
-          <SidebarNavLink
-            icon={Settings}
-            label="Settings"
-            linkProps={{ to: "/settings" }}
-          />
-        ) : (
-          // The account row's slot while the session loads.
-          <SidebarMenuItem>
-            <SidebarMenuSkeleton showIcon />
-          </SidebarMenuItem>
-        )}
-      </SidebarMenu>
-    </UiSidebarFooter>
+                ))}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+          <DropdownMenuItem
+            render={
+              <Link to="/settings" onClick={() => setOpenMobile(false)} />
+            }
+          >
+            <Settings className="size-4" />
+            Settings
+          </DropdownMenuItem>
+          {isHostedClientAuthMode() ? (
+            <DropdownMenuItem
+              render={
+                <Link to={BILLING_ROUTE} onClick={() => setOpenMobile(false)} />
+              }
+            >
+              <CreditCard className="size-4" />
+              Billing
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>Theme</DropdownMenuLabel>
+            <div className="px-1 pb-1">
+              <ThemePreferenceRadio />
+            </div>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => signOutAndRedirect()}
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SidebarMenuItem>
   );
 }

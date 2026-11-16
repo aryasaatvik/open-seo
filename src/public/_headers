@@ -3,3 +3,8 @@
 # manifest keep stable names, so they keep the default revalidating policy.
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+
+# Cloudflare's MIME table has no entry for .webmanifest, so it serves the file
+# as application/octet-stream. Browsers reject a manifest with a non-JSON type.
+/site.webmanifest
+  Content-Type: application/manifest+json

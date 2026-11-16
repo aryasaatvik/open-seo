@@ -48,6 +48,11 @@ export const Route = createRootRoute({
         name: "google",
         content: "notranslate",
       },
+      // The standard spelling; Safari still reads the apple-prefixed one.
+      {
+        name: "mobile-web-app-capable",
+        content: "yes",
+      },
       {
         name: "apple-mobile-web-app-capable",
         content: "yes",
@@ -77,7 +82,14 @@ export const Route = createRootRoute({
         href: "/favicon-16x16.png",
       },
       { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
-      { rel: "manifest", href: "/site.webmanifest" },
+      // The manifest is fetched with credentials: behind Cloudflare Access the
+      // request is authenticated like any other same-origin asset, and without
+      // this the browser omits the Access cookie and gets a 401.
+      {
+        rel: "manifest",
+        href: "/site.webmanifest",
+        crossOrigin: "use-credentials",
+      },
     ],
     scripts: [],
   }),

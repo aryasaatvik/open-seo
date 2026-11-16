@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Button } from "@/client/components/ui/button";
 import { Spinner } from "@/client/components/ui/spinner";
@@ -13,6 +13,7 @@ import { authClient, useSession } from "@/lib/auth-client";
 import {
   isEmailVerificationBypassed,
   isHostedClientAuthMode,
+  usesBetterAuthClient,
 } from "@/lib/auth-mode";
 import { getSignInSearch, normalizeAuthRedirect } from "@/lib/auth-redirect";
 import { z } from "zod";
@@ -32,6 +33,11 @@ export const Route = createFileRoute("/verify-email")({
   validateSearch: verifyEmailSearchSchema,
   component: VerifyEmailPage,
 });
+
+const UNAVAILABLE_COPY = {
+  title: "Verify email",
+  helperText: "Email confirmation isn't available right now.",
+};
 
 function getVerificationErrorMessage(error: string | undefined) {
   switch ((error ?? "").toLowerCase()) {
@@ -62,10 +68,7 @@ function getVerifyEmailPageCopy({
   email: string | undefined;
 }) {
   if (!isHostedMode) {
-    return {
-      title: "Verify email",
-      helperText: "Email confirmation isn't available right now.",
-    };
+    return UNAVAILABLE_COPY;
   }
 
   if (errorMessage) {
@@ -104,6 +107,28 @@ function getVerifyEmailPageCopy({
 function VerifyEmailPage() {
   const search = Route.useSearch();
   const redirectTo = normalizeAuthRedirect(search.redirect);
+
+  // Only hosted and password modes have accounts to confirm. Access,
+  // local_noauth and Every App take identity from outside the app, so their
+  // /api/auth routes 404 and the session read / resend flow below could only
+  // fail; they keep the same unavailable card without mounting them.
+  if (!usesBetterAuthClient()) {
+    return (
+      <VerifyEmailCard
+        title={UNAVAILABLE_COPY.title}
+        helperText={UNAVAILABLE_COPY.helperText}
+        redirectTo={redirectTo}
+      >
+        {null}
+      </VerifyEmailCard>
+    );
+  }
+
+  return <AccountVerifyEmailPage redirectTo={redirectTo} />;
+}
+
+function AccountVerifyEmailPage({ redirectTo }: { redirectTo: string }) {
+  const search = Route.useSearch();
   const isHostedMode = isHostedClientAuthMode();
   const { data: session, isPending } = useSession();
   const bypassEmailVerification = isEmailVerificationBypassed();
@@ -191,10 +216,48 @@ function VerifyEmailPage() {
   }
 
   return (
+    <VerifyEmailCard
+      title={pageCopy.title}
+      helperText={pageCopy.helperText}
+      redirectTo={redirectTo}
+    >
+      {!isHostedMode ? null : errorMessage ? (
+        <p className="text-sm text-destructive">{errorMessage}</p>
+      ) : isPending || isRedirecting ? (
+        <div className="flex justify-center py-4">
+          <Spinner />
+        </div>
+      ) : email ? (
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full"
+          pending={isResending}
+          onClick={() => void handleResend()}
+        >
+          {isResending ? "Sending email..." : "Resend email"}
+        </Button>
+      ) : null}
+    </VerifyEmailCard>
+  );
+}
+
+function VerifyEmailCard({
+  title,
+  helperText,
+  redirectTo,
+  children,
+}: {
+  title: string;
+  helperText: string | undefined;
+  redirectTo: string;
+  children: ReactNode;
+}) {
+  return (
     <AuthPageShell>
       <AuthPageCard
-        title={pageCopy.title}
-        helperText={pageCopy.helperText}
+        title={title}
+        helperText={helperText}
         footer={
           <p className="text-sm">
             <Link
@@ -207,23 +270,7 @@ function VerifyEmailPage() {
           </p>
         }
       >
-        {!isHostedMode ? null : errorMessage ? (
-          <p className="text-sm text-destructive">{errorMessage}</p>
-        ) : isPending || isRedirecting ? (
-          <div className="flex justify-center py-4">
-            <Spinner />
-          </div>
-        ) : email ? (
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            pending={isResending}
-            onClick={() => void handleResend()}
-          >
-            {isResending ? "Sending email..." : "Resend email"}
-          </Button>
-        ) : null}
+        {children}
       </AuthPageCard>
     </AuthPageShell>
   );

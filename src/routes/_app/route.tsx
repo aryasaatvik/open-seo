@@ -8,6 +8,7 @@ import { PageLoading } from "@/client/components/Spinner";
 import { getLastProjectId } from "@/client/lib/active-project";
 import { AuthenticatedAppLayout } from "@/client/layout/AppShell";
 import { useOnboardingRedirect } from "@/client/features/onboarding/useOnboardingRedirect";
+import { usesBetterAuthClient } from "@/lib/auth-mode";
 
 export const Route = createFileRoute("/_app")({
   component: AppRouteLayout,
@@ -17,9 +18,23 @@ export const Route = createFileRoute("/_app")({
 // drawer, setup modal and GSC nudge keep their state when the user moves
 // between the two.
 function AppRouteLayout() {
+  const { projectId } = useParams({ strict: false });
+  // Access, local_noauth and Every App have no Better Auth session: the server
+  // 404s /api/auth/*, so the guard and onboarding hooks would only fire a
+  // request that cannot succeed. They render the shell immediately.
+  if (!usesBetterAuthClient()) {
+    return (
+      <AuthenticatedAppLayout projectId={projectId} ready>
+        <Outlet />
+      </AuthenticatedAppLayout>
+    );
+  }
+  return <BetterAuthAppRouteLayout projectId={projectId} />;
+}
+
+function BetterAuthAppRouteLayout({ projectId }: { projectId?: string }) {
   const authGate = useHostedAuthRouteGuard();
   const isOnboarded = useOnboardingRedirect();
-  const { projectId } = useParams({ strict: false });
   // The page and banners render while the session check runs, so a page shows
   // its own skeleton from the first frame and loads its data alongside the
   // check. The check only redirects (signed out, unverified email): every

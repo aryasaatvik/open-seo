@@ -15,11 +15,26 @@ export const Route = createFileRoute("/_auth")({
 });
 
 function AuthPageLayout() {
+  // Only hosted and password modes have accounts to sign into. Access,
+  // local_noauth and Every App take identity from outside the app, so the
+  // session read below could only 404 on their /api/auth routes; they render
+  // the shell as-is.
+  if (!usesBetterAuthClient()) {
+    return (
+      <AuthPageShell>
+        <Outlet />
+      </AuthPageShell>
+    );
+  }
+
+  return <BetterAuthAuthPageLayout />;
+}
+
+function BetterAuthAuthPageLayout() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   const { data: session, isPending } = useSession();
   const [hasResolvedSession, setHasResolvedSession] = useState(false);
-  const hasAccounts = usesBetterAuthClient();
   const redirectTo = getCurrentAuthRedirect(search.redirect);
 
   useEffect(() => {
@@ -45,10 +60,7 @@ function AuthPageLayout() {
   }, [navigate, redirectTo, session?.user?.id]);
 
   // Loading the session, or handing a signed-in user off to the destination.
-  if (
-    hasAccounts &&
-    ((isPending && !hasResolvedSession) || session?.user?.id)
-  ) {
+  if ((isPending && !hasResolvedSession) || session?.user?.id) {
     return <PageLoading />;
   }
 
