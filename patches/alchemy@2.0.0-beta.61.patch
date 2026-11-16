@@ -217,6 +217,24 @@ index c8ab1322347095c9f7cfda63c382c0b6ad17775d..7e311e120658debd792d45e99a2818d7
      return true;
  };
  //# sourceMappingURL=Application.js.map
+\ No newline at end of file
+diff --git a/lib/Cloudflare/Workers/Assets.js b/lib/Cloudflare/Workers/Assets.js
+index b48cc3f8d6ad69f920f387e63284a550c58f7fa4..888c8fa1899690cc65a0eea3d0dbcef500a5fa12 100644
+--- a/lib/Cloudflare/Workers/Assets.js
++++ b/lib/Cloudflare/Workers/Assets.js
+@@ -25,6 +25,12 @@ const getContentType = (name) => {
+         return "text/sql";
+     if (name.endsWith(".json"))
+         return "application/json";
++    // Web app manifests are JSON, but Cloudflare's MIME table has no entry for
++    // .webmanifest, so the upload defaulted to application/octet-stream and
++    // browsers refused to install the app. The Workers assets API takes the
++    // content type from the uploaded File, so map it here.
++    if (name.endsWith(".webmanifest"))
++        return "application/manifest+json";
+     if (name.endsWith(".js") || name.endsWith(".mjs")) {
+         // Browsers only accept JavaScript module scripts when the MIME type is a
+         // "JavaScript MIME type" (e.g. text/javascript). application/javascript+module
 diff --git a/lib/Cloudflare/Workers/WorkerProvider.js b/lib/Cloudflare/Workers/WorkerProvider.js
 index 5c4c4555cbbe92330341c470079addd7af5e94cb..e345bbbf0fe2224cf5a7cb0be989a0b30ef6e88b 100644
 --- a/lib/Cloudflare/Workers/WorkerProvider.js
