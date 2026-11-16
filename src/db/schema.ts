@@ -11,6 +11,8 @@ import * as sqliteGa4 from "./ga4.schema";
 import * as sqliteGsc from "./gsc.schema";
 import * as sqliteTelemetry from "./telemetry.schema";
 import * as sqliteAiVisibility from "./ai-visibility.schema";
+import * as sqliteLocalSeo from "./local-seo.schema";
+import * as sqliteStripeProjects from "./stripe-projects.schema";
 import * as pgApp from "./pg/app.schema";
 import * as pgProjectContext from "./pg/project-context.schema";
 import * as pgReports from "./pg/reports.schema";
@@ -23,6 +25,8 @@ import * as pgGa4 from "./pg/ga4.schema";
 import * as pgGsc from "./pg/gsc.schema";
 import * as pgTelemetry from "./pg/telemetry.schema";
 import * as pgAiVisibility from "./pg/ai-visibility.schema";
+import * as pgLocalSeo from "./pg/local-seo.schema";
+import * as pgStripeProjects from "./pg/stripe-projects.schema";
 
 // Canonical schema barrel. Repositories import their tables from here and the
 // provider-aware `db` from "@/db", so each repository is written ONCE for both
@@ -45,7 +49,9 @@ type AppSchema = typeof sqliteApp &
   typeof sqliteGa4 &
   typeof sqliteGsc &
   typeof sqliteTelemetry &
-  typeof sqliteAiVisibility;
+  typeof sqliteAiVisibility &
+  typeof sqliteLocalSeo &
+  typeof sqliteStripeProjects;
 
 const runtimeSchema =
   getDatabaseProvider() === "postgres"
@@ -62,6 +68,8 @@ const runtimeSchema =
         ...pgGsc,
         ...pgTelemetry,
         ...pgAiVisibility,
+        ...pgLocalSeo,
+        ...pgStripeProjects,
       }
     : {
         ...sqliteApp,
@@ -76,6 +84,8 @@ const runtimeSchema =
         ...sqliteGsc,
         ...sqliteTelemetry,
         ...sqliteAiVisibility,
+        ...sqliteLocalSeo,
+        ...sqliteStripeProjects,
       };
 
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- guarded by schema-parity.test.ts
@@ -83,6 +93,9 @@ const schema = runtimeSchema as unknown as AppSchema;
 
 export const {
   userOnboardingAnswers,
+  userSignupCampaigns,
+  accountDeletionRequests,
+  guestAccounts,
   projects,
   savedKeywords,
   savedKeywordTags,
@@ -127,4 +140,13 @@ export const {
   aiObservations,
   aiSources,
   aiMatches,
+  localRankTrackers,
+  localRankChecks,
+  localRankKeywords,
+  localRankScans,
+  localRankPoints,
+  localRankBusinesses,
+  localRankResults,
+  stripeProjectsGrants,
+  stripeProjectsResources,
 } = schema;

@@ -82,8 +82,12 @@ export const emailAccessGate = (options: {
   policyName: string;
   applicationName: string;
   domain: string;
+  /** A second hostname (a self-host's CUSTOM_DOMAIN) the same app protects. */
+  extraDomain?: string;
   emails: string[];
   serviceTokenIds?: string[];
+  /** Turn on Access Managed OAuth so MCP clients can sign in. */
+  managedOAuth?: boolean;
 }) =>
   Effect.gen(function* () {
     const allow = yield* Cloudflare.Access.Policy(options.policyId, {
@@ -109,12 +113,33 @@ export const emailAccessGate = (options: {
       type: "self_hosted",
       name: options.applicationName,
       domain: options.domain,
+      // One application (one `aud`) covers both hostnames. `domain` stays the
+      // workers.dev hostname so an existing application updates in place.
+      destinations: options.extraDomain
+        ? [
+            { type: "public", uri: options.domain },
+            { type: "public", uri: options.extraDomain },
+          ]
+        : undefined,
       policies,
+      // Lets CLI and desktop MCP clients register localhost callbacks.
+      // Unset fields (HTTPS redirect URIs, token lifetimes) keep whatever is
+      // set in the dashboard.
+      oauthConfiguration: options.managedOAuth
+        ? {
+            enabled: true,
+            dynamicClientRegistration: {
+              enabled: true,
+              allowAnyOnLocalhost: true,
+              allowAnyOnLoopback: true,
+            },
+          }
+        : undefined,
     });
   });
 
 export const accessScopeHint =
-  " (if this is a permissions error, re-run `pnpm alchemy login --configure`, answer yes to “Customize OAuth scopes?”, and select access:write alongside the defaults)";
+  " (if this is a permissions error, re-run `pnpm alchemy login deploy/alchemy/alchemy.run.ts --configure`, answer yes to “Customize OAuth scopes?”, and select access:write alongside the defaults)";
 
 /**
  * ACCESS_SERVICE_TOKENS: `<service-token-id>=<email>,...`. Each Access
