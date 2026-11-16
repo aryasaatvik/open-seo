@@ -25,7 +25,7 @@ import { createOpenSeoMcpServer } from "@/server/mcp/server";
 import { supportsMcpApps } from "@/server/mcp/ui-capabilities";
 import { AuthRepository } from "@/server/auth/repositories/AuthRepository";
 import { GuestAccountRepository } from "@/server/auth/repositories/GuestAccountRepository";
-import { describeError } from "@/server/lib/errors";
+import { asAppError, describeError } from "@/server/lib/errors";
 
 // Mirrors the agents SDK's DEFAULT_CORS_OPTIONS so legacy responses carry the
 // same CORS surface as the modern handler's.
@@ -280,6 +280,9 @@ export async function handleSelfHostedOpenSeoMcpRequest(
         ? await resolveLocalNoAuthContext()
         : await resolveCloudflareAccessContext(request.headers);
   } catch (error) {
+    if (!asAppError(error)) {
+      console.error(`mcp.auth identity lookup failed: ${describeError(error)}`);
+    }
     return responseForAppError(error, "MCP authentication failed");
   }
   const props = createWorkersOAuthMcpProps({
