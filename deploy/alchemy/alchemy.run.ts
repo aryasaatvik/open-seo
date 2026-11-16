@@ -530,9 +530,9 @@ export default Alchemy.Stack(
       domain: prod
         ? ["app.openseo.so", "www.app.openseo.so"]
         : customDomain || undefined,
-      // With a custom domain the Access application covers only that
-      // hostname, so drop the workers.dev route instead of leaving an
-      // unauthenticated (fail-closed, but public) copy of the app around.
+      // Keep one public hostname when a custom domain is configured. The
+      // Access application can cover both destinations, but workers.dev
+      // must stay disabled for this self-host deployment.
       url: !customDomain,
       // Prebuilt worker from `vite build` (@cloudflare/vite-plugin). The entry
       // exports the DO + WorkflowEntrypoint classes (re-exported by

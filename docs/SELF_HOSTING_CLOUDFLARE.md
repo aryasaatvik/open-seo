@@ -118,13 +118,13 @@ A Cloudflare Workflow on the Workers Free plan can make 50 outgoing requests per
 
 ## Machine clients (service tokens)
 
-A machine client such as an Executor instance can call `/mcp` with a Cloudflare Access service token instead of a browser login. Create the token under Zero Trust -> Access -> Service Auth, then add it to `.env.selfhost` as `ACCESS_SERVICE_TOKENS=<service-token-id>=<email>` and redeploy. The deploy adds a Service Auth policy for the token and the app treats requests carrying it as that user, who must be in `ACCESS_ALLOWED_EMAILS` and have signed in once. The client sends the token as the `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers.
+A machine client such as an Executor instance can call `/mcp` with a Cloudflare Access service token instead of a browser login. Create the token under Zero Trust -> Access -> Service Auth, then add it to `.env.selfhost` as `ACCESS_SERVICE_TOKENS=<service-token-id>=<email>` and redeploy. The deploy adds a Service Auth policy for the token and the app treats requests carrying it as that user, who must have signed in once so that the user row exists. Service-token aliases require the deploy-managed Access application; supplying both `TEAM_DOMAIN` and `POLICY_AUD` bypasses provisioning and alias derivation. The client sends the token as the `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers.
 
 ## Troubleshooting
 
 - `https://<your-worker-hostname>/api/health` reports runtime configuration checks and database status.
 - Cloudflare Access login fails: re-check `ACCESS_ALLOWED_EMAILS` in `.env.selfhost` and redeploy.
-- For server errors, open the Worker `Logs` or run `pnpm exec wrangler tail`. Site audits run in a separate worker: `pnpm exec wrangler tail open-seo-selfhost-audit`.
+- For server errors, open the Worker `Logs` or run `pnpm exec wrangler tail`. Site audits run in a separate worker: `pnpm exec wrangler tail open-seo-audit`.
 
 ## Tearing it down
 

@@ -1,6 +1,6 @@
 ---
 name: openseo-selfhost-upgrade
-description: Inspect, rebase, and redeploy the aryasaatvik/open-seo fork that self-hosts OpenSEO at seo.arya.sh on Cloudflare (alchemy stage `selfhost`, D1, Cloudflare Access). Use when pulling upstream every-app/open-seo into `dev`, resolving conflicts around the fork's selfhost patches, changing `.env.selfhost`, redeploying, or explaining how the self-host is wired. Not for upstream contributions; this fork opens no upstream PRs.
+description: Inspect, prepare, and redeploy the aryasaatvik/open-seo fork that self-hosts OpenSEO at seo.arya.sh on Cloudflare (alchemy stage `selfhost`, D1, Cloudflare Access). Use when pulling upstream every-app/open-seo into `dev`, resolving conflicts around the fork's selfhost patches, changing `.env.selfhost`, redeploying, or explaining how the self-host is wired. Not for upstream contributions; this fork opens no upstream PRs.
 metadata:
   internal: true
 ---
@@ -14,11 +14,11 @@ Keep the fork current with upstream and the live deployment current with the for
 Start in the least-mutating phase that satisfies the request:
 
 - **Inspect** is read-only. Run the preflight, refresh remote-tracking refs when current upstream state matters, and report drift and blockers.
-- **Prepare** rebases `dev` onto the fetched `upstream/main` in an isolated branch, resolves conflicts around the fork patches, and runs the gates. It does not touch `origin/dev` or the deployment.
-- **Promote** moves `origin/dev` to the reviewed candidate with an exact lease. Ask immediately before the force-with-lease.
+- **Prepare** merges the pinned `upstream/main` into an isolated branch — a merge commit, never a rebase — resolves conflicts around the fork patches in that merge, and runs the gates. It does not touch `origin/dev` or the deployment.
+- **Promote** fast-forwards `origin/dev` to the reviewed candidate after verifying the captured remote head. It requires promotion authorization. A promoted candidate is not a deployment: the live worker keeps the previously deployed SHA until **Deploy** runs.
 - **Deploy** runs `pnpm deploy:selfhost` from the promoted `dev` and verifies the live site. Ask immediately before the deploy when the diff adds D1 migrations, changes bindings, or changes Access.
 
-An approval for one phase does not authorize a later one. A request to discuss or inspect is not permission to rebase, push, or deploy.
+An approval for one phase does not authorize a later one, and writing a resolved merge is not permission to push or deploy. A request to discuss or inspect is not permission to merge, push, or deploy.
 
 ## Required reading
 
@@ -46,6 +46,7 @@ The script is read-only. It never fetches, switches branches, installs, or deplo
 - One deployment, stage `selfhost`, unsuffixed resource names. Never create a second stage on the Arya Labs account with the name `selfhost`. D1, R2, and KV are retained on destroy (fork patch), so a destroy leaves them orphaned and the next deploy needs `--adopt`.
 - `.env.selfhost` is the complete binding set. Alchemy replaces every var and secret on each deploy, so a key missing from the file deploys as empty. Never commit it and never echo its values.
 - Use the repo's `pnpm` scripts for build, typecheck, and deploy. Use Wrangler only for D1 inspection and reads; alchemy owns the resources.
+- Review Alchemy upgrades separately from upstream application changes. The current pin is `2.0.0-beta.61`; check profile/state compatibility against the installed source before deployment, and never print credential values. A missing legacy profile does not establish that the modern stored grant is invalid.
 - Use Executor through MCP for live Cloudflare inspection (worker versions, logs, Access apps). Never the Executor CLI.
 - Record the old `dev` SHA, the upstream SHA, and the deployed worker version before mutating any of them.
 
@@ -53,7 +54,7 @@ The script is read-only. It never fetches, switches branches, installs, or deplo
 
 Stop and ask when:
 
-- a conflict touches `alchemy.run.ts` or `alchemy.access.ts` beyond the documented fork patches, or upstream changed the stage/suffix model, Access provisioning, or the binding set;
+- a conflict touches `deploy/alchemy/alchemy.run.ts` or `deploy/alchemy/alchemy.access.ts` beyond the documented fork patches, or upstream changed the stage/suffix model, Access provisioning, the hostname var, or the binding set;
 - upstream adds a D1 migration that rewrites or drops populated tables, or changes the `d1_migrations` table name;
 - upstream changes the OAuth callback paths, `AUTH_MODE` semantics, or the `.env.selfhost` contract;
 - any checkout is dirty or `origin/dev` moved after the lease was captured;
