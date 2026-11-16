@@ -65,6 +65,12 @@ const repoState = (path: string): RepoState => {
   };
 };
 
+// The fork's documented patch surface (references/topology.md). Anything else
+// in the fork-only diff is a warning: it means a patch landed outside the
+// deploy layer and the topology table needs updating.
+const DEPLOY_LAYER =
+  /^(deploy\/alchemy\/alchemy\.(run|access)\.ts|deploy\/\.env\.selfhost\.example|docs\/SELF_HOSTING_CLOUDFLARE\.md|knip\.jsonc|src\/env\.d\.ts|src\/middleware\/ensure-user\/(cloudflareAccess|delegated)(\.test)?\.ts|src\/server\/mcp\/transport(\.test)?\.ts|\.agents\/skills\/openseo-selfhost-upgrade\/|\.claude\/skills\/openseo-selfhost-upgrade)/;
+
 const checks: Check[] = [];
 const push = (severity: Check["severity"], name: string, detail: string) =>
   checks.push({ severity, name, detail });
@@ -179,12 +185,12 @@ if (originDev && upstreamMain) {
   const forkFiles = git(mainPath, "diff", "--name-only", `${upstreamMain}...${originDev}`);
   const appFiles = forkFiles.stdout
     .split("\n")
-    .filter((file) => file && !/^(alchemy\.(run|access)\.ts|\.env\.selfhost\.example|knip\.jsonc|\.agents\/skills\/openseo-selfhost-upgrade\/|\.claude\/skills\/openseo-selfhost-upgrade)/.test(file));
+    .filter((file) => file && !DEPLOY_LAYER.test(file));
   push(
     appFiles.length === 0 ? "ok" : "warning",
     "fork.surface",
     appFiles.length === 0
-      ? "fork patches stay in the deploy layer"
+      ? "fork patches match the documented deploy and authentication surface"
       : `fork touches files outside the documented patch surface: ${appFiles.join(", ")}; update references/topology.md`,
   );
 }
@@ -193,19 +199,34 @@ if (originDev && upstreamMain) {
 const envPath = join(mainPath, ".env.selfhost");
 const envKeys: string[] = [];
 if (!existsSync(envPath)) {
-  push("blocker", "env.exists", ".env.selfhost missing; cp .env.selfhost.example .env.selfhost");
+  push("blocker", "env.exists", ".env.selfhost missing; cp deploy/.env.selfhost.example .env.selfhost");
 } else {
   push("ok", "env.exists", envPath);
   const mode = statSync(envPath).mode & 0o777;
   push(mode === 0o600 ? "ok" : "warning", "env.mode", `mode ${mode.toString(8)}${mode === 0o600 ? "" : "; expected 600"}`);
+  // AUTH_MODE is the only value this script reads. It is not a secret, but it
+  // never leaves the process: the checks below only compare it.
+  let authMode = "";
   for (const line of readFileSync(envPath, "utf8").split("\n")) {
     const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
-    if (match && match[2].length > 0) envKeys.push(match[1]);
+    if (!match) continue;
+    const value = match[2].replace(/^(["'])(.*)\1$/, "$2");
+    if (value.length === 0) continue;
+    envKeys.push(match[1]);
+    if (match[1] === "AUTH_MODE") authMode = value;
   }
   envKeys.sort();
   const has = (key: string) => envKeys.includes(key);
   if (!has("DATAFORSEO_API_KEY")) push("blocker", "env.dataforseo", "DATAFORSEO_API_KEY unset");
-  const managedAccess = !(has("TEAM_DOMAIN") && has("POLICY_AUD"));
+  const authModes = ["cloudflare_access", "local_noauth", "hosted", "password"];
+  // Mirrors the stack: an unset AUTH_MODE means the Access-gated mode, so an
+  // existing deployment with no AUTH_MODE keeps its Access application.
+  const effectiveAuthMode = authMode || "cloudflare_access";
+  if (!authModes.includes(effectiveAuthMode)) {
+    push("blocker", "env.auth_mode", `AUTH_MODE is not one of ${authModes.join(", ")}`);
+  }
+  const managedAccess =
+    effectiveAuthMode === "cloudflare_access" && !(has("TEAM_DOMAIN") && has("POLICY_AUD"));
   if (managedAccess && !has("ACCESS_ALLOWED_EMAILS")) {
     push("blocker", "env.access", "ACCESS_ALLOWED_EMAILS unset and no TEAM_DOMAIN+POLICY_AUD");
   }
@@ -213,16 +234,28 @@ if (!existsSync(envPath)) {
   if (google.length > 0 && google.length < 3) {
     push("blocker", "env.google", `Google needs all three keys, found ${google.join(", ")}`);
   }
-  push(has("DOMAIN") ? "ok" : "warning", "env.domain", has("DOMAIN") ? "DOMAIN set" : "DOMAIN unset; deploy would fall back to workers.dev");
+  push(
+    has("CUSTOM_DOMAIN") ? "ok" : "warning",
+    "env.custom_domain",
+    has("CUSTOM_DOMAIN") ? "CUSTOM_DOMAIN set" : "CUSTOM_DOMAIN unset; the deploy falls back to workers.dev",
+  );
+  // DOMAIN was this fork's var before upstream's CUSTOM_DOMAIN. Alchemy
+  // ignores an unknown key, so a leftover DOMAIN would silently deploy a
+  // workers.dev hostname.
+  if (has("DOMAIN")) {
+    push("blocker", "env.legacy_domain", "DOMAIN is unread since upstream's CUSTOM_DOMAIN; rename it in .env.selfhost");
+  }
   push("ok", "env.keys", envKeys.join(", "));
 
-  const examplePath = join(mainPath, ".env.selfhost.example");
+  const examplePath = join(mainPath, "deploy/.env.selfhost.example");
   if (existsSync(examplePath)) {
     const exampleKeys = [...readFileSync(examplePath, "utf8").matchAll(/^#?\s?([A-Z][A-Z0-9_]*)=/gm)].map((m) => m[1]);
     const unknown = envKeys.filter((key) => !exampleKeys.includes(key));
-    if (unknown.length > 0) push("warning", "env.unknown", `keys not in .env.selfhost.example: ${unknown.join(", ")}`);
+    if (unknown.length > 0) push("warning", "env.unknown", `keys not in deploy/.env.selfhost.example: ${unknown.join(", ")}`);
     const unused = exampleKeys.filter((key) => !envKeys.includes(key));
     push("ok", "env.unset", unused.length === 0 ? "every example key is set" : `example keys left unset: ${unused.join(", ")}`);
+  } else {
+    push("warning", "env.example", "deploy/.env.selfhost.example is missing; the key cross-check did not run");
   }
 }
 
